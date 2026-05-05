@@ -8,6 +8,61 @@ A practical control kit for coordinating AI coding agents without handing them t
 
 ---
 
+## How it works
+
+```
+Mission Brief
+  |
+  v
+Planner Agent
+  |
+  v
+Human Approves Plan
+  |
+  v
+Builder Agent opens PR
+  |
+  v
+Safety Checks + No-Secrets Scan
+  |
+  v
+Reviewer Agent + Diff Explainer
+  |
+  v
+Human Merge
+  |
+  v
+Release Notes + Rollback Plan
+```
+
+The point is simple: agents can move fast, but humans set the mission, approve the plan, review the PR, and own the merge.
+
+---
+
+## Start in 5 minutes
+
+1. Copy the starter templates into your repo.
+2. Fill out `MISSION_BRIEF.md` with one clear task and explicit out-of-scope items.
+3. Define `SAFE_REPO_BOUNDARIES.md` so the agent knows what it can and cannot touch.
+4. Run `python scripts/safety-gate.py --tree`.
+5. Open a pull request for the agent-produced change.
+6. Require human approval before merge.
+
+Start with a docs-only mission if this is your first run. Then use the [`PR safety demo`](examples/pr-safety-demo/README.md) to see the full loop.
+
+---
+
+## What to copy first
+
+- [`templates/MISSION_BRIEF.md`](templates/MISSION_BRIEF.md)
+- [`templates/AGENT_RULES.md`](templates/AGENT_RULES.md)
+- [`templates/SAFE_REPO_BOUNDARIES.md`](templates/SAFE_REPO_BOUNDARIES.md)
+- [`templates/PR_CHECKLIST.md`](templates/PR_CHECKLIST.md)
+- [`prompts/planner-agent.md`](prompts/planner-agent.md)
+- [`prompts/codex-reviewer-agent.md`](prompts/codex-reviewer-agent.md)
+
+---
+
 ## What this is
 
 Special Agent Ops is a collection of templates, prompts, workflows, and scripts for developers and teams who want to use AI coding agents — Claude, Codex, v0, Devin-style tools — without losing control of their codebase.
@@ -111,38 +166,6 @@ Rollback plan documented before deploy
 ```
 
 See [`docs/mission-flow.md`](docs/mission-flow.md) for detailed step descriptions.
-
----
-
-## Quick Start
-
-1. **Copy the templates into your own repo**
-   ```
-   cp templates/MISSION_BRIEF.md your-repo/
-   cp templates/AGENT_RULES.md your-repo/
-   cp templates/SAFE_REPO_BOUNDARIES.md your-repo/
-   ```
-
-2. **Define your safe boundaries**
-   Fill out `SAFE_REPO_BOUNDARIES.md` — what files and paths agents are allowed to touch, what is off-limits.
-
-3. **Start with a docs-only mission**
-   Run your first agent task on documentation only. No production code. This builds confidence in the workflow before you give agents access to logic or infrastructure.
-   See [`examples/docs-only-task/README.md`](examples/docs-only-task/README.md).
-
-4. **Require PR review before any merge**
-   No direct commits to `main`. Every agent-produced change goes through a pull request. A human reads the diff. See [`templates/PR_CHECKLIST.md`](templates/PR_CHECKLIST.md).
-
-5. **Run the local checks before public work**
-   ```bash
-   python scripts/safety-gate.py --tree
-   bash scripts/check-secrets.sh --all
-   ```
-
-   On Windows:
-   ```powershell
-   pwsh scripts/check-secrets.ps1 -All
-   ```
 
 ---
 
