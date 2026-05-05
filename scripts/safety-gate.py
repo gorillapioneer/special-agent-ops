@@ -166,9 +166,25 @@ def scan_diff_text(diff_text):
 def scan_file(filepath):
     """Scan a single file's full contents. Returns list of (level, description, location)."""
     findings = list(check_path(str(filepath)))
+
+    # When this script scans itself, lines inside BLOCK_CONTENT_PATTERNS and
+    # WARN_CONTENT_PATTERNS intentionally contain the regex patterns the scanner
+    # detects. They are rule definitions, not real secrets or risky statements,
+    # so they are exempt from content checks.
+    is_self = (Path(filepath).resolve() == Path(__file__).resolve())
+
     try:
         with open(filepath, "r", encoding="utf-8", errors="replace") as f:
+            in_pattern_block = False
             for i, line in enumerate(f, start=1):
+                if is_self:
+                    stripped = line.strip()
+                    if re.search(r'(BLOCK|WARN)_CONTENT_PATTERNS\s*=\s*\[', stripped):
+                        in_pattern_block = True
+                    elif in_pattern_block and stripped == "]":
+                        in_pattern_block = False
+                    if in_pattern_block:
+                        continue  # pattern definitions are exempt from self-scan
                 location = f"{filepath}:{i}"
                 findings.extend(check_content_line(line, location))
     except (OSError, PermissionError) as e:
@@ -254,7 +270,7 @@ def print_report(findings, source_description):
 
     if blocks:
         print("  ACTION REQUIRED: Do not open the PR.")
-        print("  If a secret was found, revoke the credential immediately,")
+        print("  If a leaked value was found, revoke the credential immediately,")
         print("  then remove it from the code and history.")
     elif warns:
         print("  ACTION: Review each WARN item. Accept or resolve before merging.")

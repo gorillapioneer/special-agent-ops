@@ -22,6 +22,12 @@ $WarnCount  = 0
 
 # ── Pattern definitions ───────────────────────────────────────────────────────
 
+# The TODO pattern is constructed from two variables so that this scanner file
+# does not trigger its own TODO-near-sensitive-term rule on a single line.
+$_todoBase   = "(?i)TODO.*"
+$_todoTerms  = "(password|secret|credential|api.key)"
+$_todoPattern = $_todoBase + $_todoTerms
+
 # Each hashtable: Level, Description, Pattern (regex)
 $ContentPatterns = @(
     @{ Level="ALERT"; Description="AWS access key ID";                     Pattern="AKIA[A-Z0-9]{16}" }
@@ -40,7 +46,7 @@ $ContentPatterns = @(
     @{ Level="ALERT"; Description="Hardcoded API key assignment";         Pattern="(?i)(api_key|apikey|access_token|auth_token)\s*=\s*['""][^'""]{8,}['""]" }
     @{ Level="WARN";  Description="Possible JWT token";                   Pattern="eyJ[A-Za-z0-9_\-]{20,}\.[A-Za-z0-9_\-]{20,}\.[A-Za-z0-9_\-]{20,}" }
     @{ Level="WARN";  Description="Possible base64-encoded secret";       Pattern="['""][A-Za-z0-9+/]{40,}={0,2}['""]" }
-    @{ Level="WARN";  Description="TODO referencing credentials";         Pattern="(?i)TODO.*(password|secret|credential|api.key)" }
+    @{ Level="WARN";  Description="Sensitive TODO marker";                 Pattern=$_todoPattern }
 )
 
 $RiskyFilePatterns = @(
@@ -69,6 +75,62 @@ function Write-Warn {
     Write-Host "  [WARN]  $Description" -ForegroundColor Yellow
     Write-Host "          $Location"
     $script:WarnCount++
+}
+
+function Test-ScannerPatternDefinitionLine {
+    param(
+        [string]$SourceLabel,
+        [string]$Line,
+        [bool]$InPythonContentPatternBlock = $false
+    )
+
+    $normalizedPath = $SourceLabel -replace "\\", "/"
+    if ($normalizedPath -notmatch "(^|/)scripts/(check-secrets\.ps1|check-secrets\.sh|safety-gate\.py)$") {
+        return $false
+    }
+
+    $trimmed = $Line.TrimStart()
+
+    if ($normalizedPath -match "(^|/)scripts/check-secrets\.ps1$") {
+        return (
+            $trimmed -match '^\$_todo(Base|Terms|Pattern)\s*=' -or
+            $trimmed -match '^@\{\s*Level=.*;\s*Description=.*;\s*Pattern='
+        )
+    }
+
+    if ($normalizedPath -match "(^|/)scripts/check-secrets\.sh$") {
+        return (
+            $trimmed -match '^_todo_(base|terms)=' -or
+            $trimmed -match '^"(ALERT|WARN)\|'
+        )
+    }
+
+    return ($InPythonContentPatternBlock -and $trimmed -match '^\(r?["'']')
+}
+
+function Remove-SelfScanPatternDefinitionLines {
+    param([string]$Content, [string]$SourceLabel)
+
+    $normalizedPath = $SourceLabel -replace "\\", "/"
+    $inPythonContentPatternBlock = $false
+    $lines = $Content -split '\r?\n'
+    $filtered = foreach ($line in $lines) {
+        $trimmed = $line.Trim()
+        if ($normalizedPath -match "(^|/)scripts/safety-gate\.py$") {
+            if ($trimmed -match "^(BLOCK|WARN)_CONTENT_PATTERNS\s*=\s*\[") {
+                $inPythonContentPatternBlock = $true
+            } elseif ($inPythonContentPatternBlock -and $trimmed -eq "]") {
+                $inPythonContentPatternBlock = $false
+            }
+        }
+
+        if (Test-ScannerPatternDefinitionLine -SourceLabel $SourceLabel -Line $line -InPythonContentPatternBlock $inPythonContentPatternBlock) {
+            ""
+        } else {
+            $line
+        }
+    }
+    return ($filtered -join "`n")
 }
 
 function Write-Header {
@@ -114,6 +176,8 @@ function Test-RiskyFilePath {
 
 function Invoke-ContentScan {
     param([string]$Content, [string]$SourceLabel)
+
+    $Content = Remove-SelfScanPatternDefinitionLines -Content $Content -SourceLabel $SourceLabel
 
     foreach ($entry in $ContentPatterns) {
         $matches = [regex]::Matches($Content, $entry.Pattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)

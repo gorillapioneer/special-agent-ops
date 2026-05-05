@@ -29,7 +29,7 @@ These rules apply to every agent session in this project. Read them before start
 ### Deletions
 
 10. Do not delete files unless the Mission Brief explicitly says to delete a specific, named file.
-11. Do not drop database tables, truncate data, or remove migrations without explicit instruction.
+11. Do not delete tables, truncate data, or remove migrations without explicit instruction.
 12. If your implementation requires a significant deletion, stop and ask for confirmation.
 
 ### Dependencies

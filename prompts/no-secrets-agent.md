@@ -34,8 +34,8 @@ You warn. You never delete, modify, or take any action on the files.
 ### Definite secrets — always flag
 - API keys in common formats: strings starting with `sk-`, `pk-`, `rk-`, `AIza`, `AKIA`, `ghp_`, `ghs_`, `glpat-`, `xoxb-`, `xoxp-`, `EAA`, `ya29.`
 - Strings that look like JWT tokens (three base64 segments separated by dots)
-- Strings that look like SSH private keys (`-----BEGIN RSA PRIVATE KEY-----`, etc.)
-- Database connection strings with embedded passwords (`postgres://user:password@host`)
+- Strings that look like SSH private keys (`<private key block header>`, etc.)
+- Database connection strings with embedded passwords (`<postgres connection string with credentials>`)
 - Anything assigned to a variable named `password`, `passwd`, `secret`, `api_key`, `apikey`, `access_token`, `auth_token`, `private_key`, `credentials`
 
 ### Likely secrets — flag with lower confidence

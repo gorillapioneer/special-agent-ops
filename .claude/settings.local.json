@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python *)",
+      "Bash(echo \"EXIT:$?\")",
+      "PowerShell(.\\\\scripts\\\\check-secrets.ps1 -All)"
+    ]
+  }
+}

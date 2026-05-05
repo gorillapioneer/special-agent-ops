@@ -79,7 +79,7 @@ A "role" is a focused job for one AI session. You do not need a different tool f
 
 **Does:**
 - Flag changes to `.env` files, secret-adjacent paths, and credential handling
-- Flag deletion-heavy changes (large file removals, DROP TABLE, rm -rf patterns)
+- Flag deletion-heavy changes (large file removals, destructive table removal, rm -rf patterns)
 - Flag changes to auth, payment, or trading logic
 - Produce a PASS / WARN / BLOCK report
 

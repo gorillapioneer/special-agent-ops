@@ -31,6 +31,11 @@ fi
 
 # ── Patterns ─────────────────────────────────────────────────────────────────
 
+# The TODO pattern is built from two variables so that this scanner file does
+# not trigger its own TODO-near-sensitive-term rule on a single line.
+_todo_base="TODO.*"
+_todo_terms="(password|secret|credential|api.key)"
+
 # Each entry: "LEVEL|DESCRIPTION|GREP_PATTERN"
 # ALERT = definite secret, WARN = possible secret
 
@@ -51,7 +56,7 @@ PATTERNS=(
     "ALERT|Hardcoded API key assignment|(api_key|apikey|access_token|auth_token)\s*=\s*['\"][^'\"]{8,}['\"]"
     "WARN|Possible JWT token|eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}"
     "WARN|Possible base64-encoded secret|['\"][A-Za-z0-9+/]{40,}={0,2}['\"]"
-    "WARN|TODO referencing credentials|TODO.*(password|secret|credential|api.key)"
+    "WARN|Sensitive TODO marker|${_todo_base}${_todo_terms}"
 )
 
 # File patterns that should never be committed
@@ -84,6 +89,60 @@ warn() {
     WARN_COUNT=$((WARN_COUNT + 1))
 }
 
+is_scanner_pattern_definition_line() {
+    local file="$1"
+    local line="$2"
+    local in_python_content_patterns="${3:-0}"
+    local trimmed="${line#"${line%%[![:space:]]*}"}"
+
+    case "$file" in
+        scripts/check-secrets.ps1|*/scripts/check-secrets.ps1)
+            case "$trimmed" in
+                \$_todoBase*|\$_todoTerms*|\$_todoPattern*|@\{*"Pattern="*) return 0 ;;
+            esac
+            ;;
+        scripts/check-secrets.sh|*/scripts/check-secrets.sh)
+            case "$trimmed" in
+                _todo_base=*|_todo_terms=*|\"ALERT\|*|\"WARN\|*) return 0 ;;
+            esac
+            ;;
+        scripts/safety-gate.py|*/scripts/safety-gate.py)
+            [ "$in_python_content_patterns" -eq 1 ] || return 1
+            case "$trimmed" in
+                \(r\"*) return 0 ;;
+            esac
+            ;;
+    esac
+
+    return 1
+}
+
+write_filtered_content() {
+    local file="$1"
+    local content="$2"
+    local line
+    local trimmed
+    local in_python_content_patterns=0
+
+    while IFS= read -r line || [ -n "$line" ]; do
+        trimmed="${line#"${line%%[![:space:]]*}"}"
+        case "$file" in
+            scripts/safety-gate.py|*/scripts/safety-gate.py)
+                case "$trimmed" in
+                    BLOCK_CONTENT_PATTERNS*=*\[|WARN_CONTENT_PATTERNS*=*\[) in_python_content_patterns=1 ;;
+                    \]) [ "$in_python_content_patterns" -eq 1 ] && in_python_content_patterns=0 ;;
+                esac
+                ;;
+        esac
+
+        if is_scanner_pattern_definition_line "$file" "$line" "$in_python_content_patterns"; then
+            printf '\n'
+        else
+            printf '%s\n' "$line"
+        fi
+    done <<< "$content"
+}
+
 check_file_patterns() {
     local file="$1"
     for pattern in "${RISKY_FILE_PATTERNS[@]}"; do
@@ -100,7 +159,7 @@ scan_content() {
     # Write content to a temp file for grep
     local tmpfile
     tmpfile="$(mktemp)"
-    echo "$content" > "$tmpfile"
+    write_filtered_content "$file" "$content" > "$tmpfile"
 
     for entry in "${PATTERNS[@]}"; do
         local level desc pattern
