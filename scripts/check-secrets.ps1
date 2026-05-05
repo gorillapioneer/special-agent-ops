@@ -1,8 +1,40 @@
+<#
+.SYNOPSIS
+Reports likely secrets in staged changes or tracked files.
+
+.DESCRIPTION
+Special Agent Ops secret scanner for Windows / PowerShell workflows.
+The script reports likely credentials and risky secret file names, then exits
+nonzero when findings are present. It never deletes, modifies, commits, or
+rotates anything.
+
+.PARAMETER All
+Scan all git-tracked files in the working tree.
+
+.PARAMETER File
+Scan one specific file.
+
+.EXAMPLE
+pwsh scripts/check-secrets.ps1
+
+Scan staged files and the staged diff.
+
+.EXAMPLE
+pwsh scripts/check-secrets.ps1 -All
+
+Scan all tracked files.
+
+.EXAMPLE
+pwsh scripts/check-secrets.ps1 -File README.md
+
+Scan one file.
+#>
+
 # check-secrets.ps1 — Special Agent Ops
 #
 # Simple secret scanner for Windows / PowerShell.
-# Scans staged files and recent git diff for likely credentials.
-# WARNS only. Never deletes, modifies, or commits anything.
+# Scans staged files and the staged git diff for likely credentials.
+# Reports only. Never deletes, modifies, or commits anything.
 #
 # Usage:
 #   pwsh scripts/check-secrets.ps1              # scan staged files + diff

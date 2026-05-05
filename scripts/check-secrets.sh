@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 # check-secrets.sh — Special Agent Ops
 #
-# Simple secret scanner. Scans staged files and recent git diff for likely credentials.
-# WARNS only. Never deletes, modifies, or commits anything.
+# Simple secret scanner. Scans staged files and the staged git diff for likely credentials.
+# Reports only. Never deletes, modifies, or commits anything.
 #
 # Usage:
 #   bash scripts/check-secrets.sh              # scan staged files + diff
 #   bash scripts/check-secrets.sh --all        # scan all tracked files
 #   bash scripts/check-secrets.sh --file PATH  # scan a specific file
+#   bash scripts/check-secrets.sh --help       # show usage
 #
-# Requirements: bash, git (no other dependencies)
+# Requirements: bash, git, and common Unix tools (grep, sed, mktemp, file, cat)
 
 set -euo pipefail
 
@@ -214,6 +215,26 @@ print_header() {
     echo ""
 }
 
+print_usage() {
+    cat <<'EOF'
+Usage:
+  bash scripts/check-secrets.sh
+  bash scripts/check-secrets.sh --all
+  bash scripts/check-secrets.sh --file PATH
+  bash scripts/check-secrets.sh --help
+
+Modes:
+  default       Scan staged file names and staged diff content.
+  --all         Scan all git-tracked files in the working tree.
+  --file PATH   Scan one specific file.
+
+Behavior:
+  Reports likely credentials and risky secret file names.
+  Exits nonzero when findings are present.
+  Never deletes, modifies, commits, rotates, or uploads anything.
+EOF
+}
+
 print_footer() {
     echo ""
     echo -e "${BOLD}============================================================${RESET}"
@@ -237,6 +258,11 @@ print_footer() {
 }
 
 main() {
+    if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
+        print_usage
+        exit 0
+    fi
+
     print_header
 
     local mode="${1:-}"

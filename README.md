@@ -1,8 +1,8 @@
 # Special Agent Ops
 
-> **Run AI coding agents like an ops team, not like a loose chainsaw.**
+> **Mission control for AI coding agents: give every agent a mission, a boundary, a review gate, and an off switch.**
 
-A practical control kit for coordinating AI coding agents safely across real projects.
+A practical control kit for coordinating AI coding agents without handing them the keys to the whole codebase.
 
 ---
 
@@ -131,6 +131,17 @@ See [`docs/mission-flow.md`](docs/mission-flow.md) for detailed step description
 4. **Require PR review before any merge**
    No direct commits to `main`. Every agent-produced change goes through a pull request. A human reads the diff. See [`templates/PR_CHECKLIST.md`](templates/PR_CHECKLIST.md).
 
+5. **Run the local checks before public work**
+   ```bash
+   python scripts/safety-gate.py --tree
+   bash scripts/check-secrets.sh --all
+   ```
+
+   On Windows:
+   ```powershell
+   pwsh scripts/check-secrets.ps1 -All
+   ```
+
 ---
 
 ## Risk Levels
@@ -185,8 +196,8 @@ Each prompt file in [`prompts/`](prompts/) is a ready-to-use system prompt or in
 | Script | What it does |
 |---|---|
 | [`scripts/safety-gate.py`](scripts/safety-gate.py) | Scans git diff or working tree for risky paths and patterns. Outputs PASS / WARN / BLOCK. No dependencies. |
-| [`scripts/check-secrets.sh`](scripts/check-secrets.sh) | Bash script: scans staged files for likely secrets. Warns only. |
-| [`scripts/check-secrets.ps1`](scripts/check-secrets.ps1) | PowerShell equivalent for Windows workflows. |
+| [`scripts/check-secrets.sh`](scripts/check-secrets.sh) | Bash script: reports likely secrets and risky secret file names. Exits nonzero on findings. No writes. |
+| [`scripts/check-secrets.ps1`](scripts/check-secrets.ps1) | PowerShell equivalent for Windows workflows. Reports only; never deletes or modifies files. |
 
 ---
 
@@ -198,6 +209,17 @@ Each prompt file in [`prompts/`](prompts/) is a ready-to-use system prompt or in
 | [`examples/frontend-polish-task/`](examples/frontend-polish-task/README.md) | 🟡 AMBER | UI copy and style tweaks via PR |
 | [`examples/safe-bugfix-task/`](examples/safe-bugfix-task/README.md) | 🟡 AMBER | Fix a scoped non-auth bug on a branch |
 | [`examples/pr-review-task/`](examples/pr-review-task/README.md) | 🟢 GREEN | Use an agent to review a PR diff before human merge |
+
+---
+
+## Release Readiness
+
+For v0.1.0 launch prep, use:
+
+- [`RELEASE_NOTES.md`](RELEASE_NOTES.md) for included scope, verification steps, limitations, and roadmap.
+- [`docs/launch-checklist.md`](docs/launch-checklist.md) for repo metadata, pre-launch checks, release steps, and post-launch checks.
+
+Do not publish a release, announcement, or launch post until the safety gate and no-secrets checks pass cleanly.
 
 ---
 
