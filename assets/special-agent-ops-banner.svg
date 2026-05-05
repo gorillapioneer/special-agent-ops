@@ -1,0 +1,57 @@
+﻿<svg width="1280" height="360" viewBox="0 0 1280 360" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1280" y2="360" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#06111f"/>
+      <stop offset="0.55" stop-color="#0b1528"/>
+      <stop offset="1" stop-color="#061a16"/>
+    </linearGradient>
+    <radialGradient id="blue" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(980 80) rotate(136) scale(360 220)">
+      <stop stop-color="#38bdf8" stop-opacity="0.36"/>
+      <stop offset="1" stop-color="#38bdf8" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="green" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(270 300) rotate(-28) scale(340 180)">
+      <stop stop-color="#34d399" stop-opacity="0.24"/>
+      <stop offset="1" stop-color="#34d399" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="1280" height="360" rx="32" fill="url(#bg)"/>
+  <rect width="1280" height="360" rx="32" fill="url(#blue)"/>
+  <rect width="1280" height="360" rx="32" fill="url(#green)"/>
+
+  <g opacity="0.22">
+    <path d="M70 62H1210" stroke="#94a3b8"/>
+    <path d="M70 122H1210" stroke="#94a3b8"/>
+    <path d="M70 242H1210" stroke="#94a3b8"/>
+    <path d="M122 38V326" stroke="#94a3b8"/>
+    <path d="M1038 38V326" stroke="#94a3b8"/>
+  </g>
+
+  <rect x="70" y="58" width="414" height="244" rx="22" fill="#0f172a" fill-opacity="0.78" stroke="#1e293b"/>
+  <rect x="92" y="82" width="108" height="12" rx="6" fill="#38bdf8" fill-opacity="0.75"/>
+  <rect x="92" y="112" width="328" height="14" rx="7" fill="#334155"/>
+  <rect x="92" y="146" width="274" height="14" rx="7" fill="#1e293b"/>
+  <rect x="92" y="180" width="316" height="14" rx="7" fill="#1e293b"/>
+  <rect x="92" y="214" width="236" height="14" rx="7" fill="#1e293b"/>
+
+  <rect x="92" y="252" width="148" height="26" rx="13" fill="#064e3b" stroke="#10b981" stroke-opacity="0.5"/>
+  <text x="110" y="270" fill="#a7f3d0" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="700">PASS</text>
+
+  <rect x="256" y="252" width="164" height="26" rx="13" fill="#172554" stroke="#38bdf8" stroke-opacity="0.5"/>
+  <text x="274" y="270" fill="#bae6fd" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="700">HUMAN REVIEW</text>
+
+  <text x="536" y="112" fill="#e5f2ff" font-family="Arial, Helvetica, sans-serif" font-size="54" font-weight="800" letter-spacing="-1.6">Special Agent Ops</text>
+  <text x="538" y="154" fill="#93c5fd" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="700">Mission control for AI coding agents</text>
+  <text x="538" y="196" fill="#cbd5e1" font-family="Arial, Helvetica, sans-serif" font-size="20">Give every agent a mission, a boundary, a review gate, and an off switch.</text>
+
+  <g font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="700">
+    <rect x="538" y="235" width="116" height="34" rx="17" fill="#0f766e" fill-opacity="0.28" stroke="#2dd4bf" stroke-opacity="0.5"/>
+    <text x="558" y="257" fill="#99f6e4">Missions</text>
+    <rect x="668" y="235" width="132" height="34" rx="17" fill="#1d4ed8" fill-opacity="0.24" stroke="#60a5fa" stroke-opacity="0.5"/>
+    <text x="688" y="257" fill="#bfdbfe">Boundaries</text>
+    <rect x="814" y="235" width="144" height="34" rx="17" fill="#166534" fill-opacity="0.22" stroke="#4ade80" stroke-opacity="0.5"/>
+    <text x="834" y="257" fill="#bbf7d0">Safety Gates</text>
+    <rect x="972" y="235" width="176" height="34" rx="17" fill="#312e81" fill-opacity="0.28" stroke="#818cf8" stroke-opacity="0.5"/>
+    <text x="992" y="257" fill="#c7d2fe">Human Approval</text>
+  </g>
+</svg>
