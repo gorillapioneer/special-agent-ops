@@ -62,3 +62,5 @@ review gate, and an off switch.
       useful detection patterns.
 - [ ] Keep launch posts practical: this is a control kit for human-reviewed
       agent work, not a promise of safe autonomous coding.
+
+<!-- ruleset check discovery test -->
