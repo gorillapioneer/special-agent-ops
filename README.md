@@ -1,4 +1,7 @@
 
+<p align="center">
+  <img src="assets/special-agent-ops-banner.svg" alt="Special Agent Ops - Mission control for AI coding agents" width="100%">
+</p>
 # Special Agent Ops
 
 [![Safety checks](https://github.com/gorillapioneer/special-agent-ops/actions/workflows/safety-checks.yml/badge.svg)](https://github.com/gorillapioneer/special-agent-ops/actions/workflows/safety-checks.yml)
