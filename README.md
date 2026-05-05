@@ -1,5 +1,7 @@
 # Special Agent Ops
 
+[![Safety checks](https://github.com/gorillapioneer/special-agent-ops/actions/workflows/safety-checks.yml/badge.svg)](https://github.com/gorillapioneer/special-agent-ops/actions/workflows/safety-checks.yml)
+
 > **Mission control for AI coding agents: give every agent a mission, a boundary, a review gate, and an off switch.**
 
 A practical control kit for coordinating AI coding agents without handing them the keys to the whole codebase.
@@ -201,6 +203,20 @@ Each prompt file in [`prompts/`](prompts/) is a ready-to-use system prompt or in
 
 ---
 
+## Automated safety checks
+
+GitHub Actions runs the same core checks on every push and pull request:
+
+- Python safety gate: `python scripts/safety-gate.py --tree`
+- PowerShell secrets check: `pwsh ./scripts/check-secrets.ps1 -All`
+- Bash secrets check: `bash scripts/check-secrets.sh --all`
+
+PRs should pass all three before human review and merge. CI is a filter, not an approval gate: a human still reads the mission, the diff, the safety results, and the rollback notes before merging.
+
+See [`docs/ci-safety-checks.md`](docs/ci-safety-checks.md) for failure handling and review guidance.
+
+---
+
 ## Workflow Examples
 
 | Example | Risk level | Description |
@@ -227,7 +243,7 @@ Do not publish a release, announcement, or launch post until the safety gate and
 
 These are directions the project could grow. Contributions welcome.
 
-- [ ] GitHub Actions workflow templates for automatic safety-gate runs
+- [ ] Branch protection guidance for requiring safety checks before merge
 - [ ] Agent coordination diagram (visual)
 - [ ] Checklist for onboarding a new AI tool to an existing team workflow
 - [ ] Guidance for multi-agent handoff (agent A passes output to agent B)

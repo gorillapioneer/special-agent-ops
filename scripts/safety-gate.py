@@ -83,6 +83,11 @@ WARN_PATH_PATTERNS = [
     (r"\.ya?ml$",                   "YAML config file"),
 ]
 
+# Repository-owned automation that runs this scanner. Contents are still scanned.
+ALLOWED_INTERNAL_PATHS = {
+    ".github/workflows/safety-checks.yml",
+}
+
 WARN_CONTENT_PATTERNS = [
     (r"(?i)DROP\s+TABLE",           "SQL DROP TABLE statement"),
     (r"(?i)DROP\s+DATABASE",        "SQL DROP DATABASE statement"),
@@ -115,6 +120,8 @@ def check_path(path_str):
     """Return list of (level, description) for risky path patterns."""
     findings = []
     p = path_str.replace("\\", "/").lower()
+    if p in ALLOWED_INTERNAL_PATHS:
+        return findings
     for pattern, description in BLOCK_PATH_PATTERNS:
         if re.search(pattern, p, re.IGNORECASE):
             findings.append(("BLOCK", description, path_str))

@@ -1,0 +1,43 @@
+name: Safety checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  python-safety-gate:
+    name: Python safety gate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Run safety gate
+        run: python scripts/safety-gate.py --tree
+
+  powershell-secrets-check:
+    name: PowerShell secrets check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Run PowerShell secrets check
+        shell: pwsh
+        run: ./scripts/check-secrets.ps1 -All
+
+  bash-secrets-check:
+    name: Bash secrets check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Run Bash secrets check
+        run: bash scripts/check-secrets.sh --all

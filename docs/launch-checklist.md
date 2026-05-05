@@ -31,6 +31,7 @@ review gate, and an off switch.
 - [ ] Docs and templates use safe placeholders, not real credentials or
       destructive command examples.
 - [ ] Internal Markdown links resolve.
+- [ ] GitHub Actions safety checks pass on the launch branch.
 - [ ] Scanner scripts are dependency-light and use only Python stdlib,
       PowerShell built-ins, or Bash plus common Unix tools.
 - [ ] Safety scanners have not been weakened to make launch pass.
@@ -43,6 +44,7 @@ review gate, and an off switch.
 - [ ] Run `pwsh scripts/check-secrets.ps1 -All`.
 - [ ] Run `bash scripts/check-secrets.sh --all` where Bash is available.
 - [ ] Confirm all required checks report PASS or CLEAN.
+- [ ] Confirm the `Safety checks` GitHub Actions workflow is green.
 - [ ] Review `RELEASE_NOTES.md` for v0.1.0 scope, limitations, and roadmap.
 - [ ] Confirm version tag is `v0.1.0`.
 - [ ] Create the GitHub release from `RELEASE_NOTES.md`.
@@ -60,4 +62,3 @@ review gate, and an off switch.
       useful detection patterns.
 - [ ] Keep launch posts practical: this is a control kit for human-reviewed
       agent work, not a promise of safe autonomous coding.
-
