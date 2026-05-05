@@ -1,4 +1,3 @@
-
 <p align="center">
   <img src="assets/special-agent-ops-banner.svg" alt="Special Agent Ops - Mission control for AI coding agents" width="100%">
 </p>
