@@ -1,6 +1,6 @@
 # Workflow Examples
 
-These are condensed descriptions of the four example workflows in the `examples/` directory. Each one shows the mission flow applied to a specific type of task.
+These are condensed descriptions of the example workflows in the `examples/` directory. Each one shows the mission flow applied to a specific type of task.
 
 ---
 
@@ -89,10 +89,31 @@ See: [`examples/pr-review-task/README.md`](../examples/pr-review-task/README.md)
 
 ---
 
+## 5. PR safety demo (AMBER)
+
+**The task:** Add an API health badge to a dashboard.
+
+**Why it's AMBER:** The agent writes a small user-facing dashboard change and adds tests. The task is scoped and reversible, but it still changes production UI behavior.
+
+**What the workflow looks like:**
+
+1. Mission brief names the dashboard files, risk level, done criteria, and out-of-scope areas.
+2. Builder Agent adds the badge on a feature branch and stops if API helper behavior needs to change.
+3. Safety checks run before review.
+4. Reviewer Agent flags one accessibility wording improvement.
+5. Diff Explainer summarizes the files and rollback surface.
+6. Human reviewer confirms the final diff, checks, tests, and rollback plan before merge.
+
+**Key lesson:** A real PR gate is more than "tests passed." The reviewer needs the mission, the safety results, the diff explanation, and a clear rollback path before approving.
+
+See: [`examples/pr-safety-demo/README.md`](../examples/pr-safety-demo/README.md)
+
+---
+
 ## Choosing the right example to start with
 
 If you are new to this workflow: start with the docs-only task. Get comfortable with the branch-PR-merge loop before you add code changes.
 
 If you have an existing codebase: start with the PR review task. No agent writes code — you just add explanation and review to your existing process. It is the lowest-stakes entry point.
 
-If you want to see the full mission flow: the safe-bugfix task uses every step.
+If you want to see the full mission flow with CI and PR gates: use the PR safety demo.

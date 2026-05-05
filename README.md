@@ -214,6 +214,7 @@ GitHub Actions runs the same core checks on every push and pull request:
 PRs should pass all three before human review and merge. CI is a filter, not an approval gate: a human still reads the mission, the diff, the safety results, and the rollback notes before merging.
 
 See [`docs/ci-safety-checks.md`](docs/ci-safety-checks.md) for failure handling and review guidance.
+See [`docs/branch-protection.md`](docs/branch-protection.md) for making these checks required before merge.
 
 ---
 
@@ -225,6 +226,7 @@ See [`docs/ci-safety-checks.md`](docs/ci-safety-checks.md) for failure handling 
 | [`examples/frontend-polish-task/`](examples/frontend-polish-task/README.md) | 🟡 AMBER | UI copy and style tweaks via PR |
 | [`examples/safe-bugfix-task/`](examples/safe-bugfix-task/README.md) | 🟡 AMBER | Fix a scoped non-auth bug on a branch |
 | [`examples/pr-review-task/`](examples/pr-review-task/README.md) | 🟢 GREEN | Use an agent to review a PR diff before human merge |
+| [`examples/pr-safety-demo/`](examples/pr-safety-demo/README.md) | 🟡 AMBER | Walk through mission, safety checks, review, approval, and rollback |
 
 ---
 
@@ -243,7 +245,6 @@ Do not publish a release, announcement, or launch post until the safety gate and
 
 These are directions the project could grow. Contributions welcome.
 
-- [ ] Branch protection guidance for requiring safety checks before merge
 - [ ] Agent coordination diagram (visual)
 - [ ] Checklist for onboarding a new AI tool to an existing team workflow
 - [ ] Guidance for multi-agent handoff (agent A passes output to agent B)
