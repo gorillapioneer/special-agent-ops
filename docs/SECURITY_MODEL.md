@@ -44,7 +44,7 @@ The seal is a tamper-evidence mechanism, not a trust mechanism. It answers: *"ha
 - **Whether the command itself was safe.** The command is user-supplied and executed in a shell (`shell=True`). A malicious or buggy command can do anything the user's shell can do.
 - **Whether the output is accurate.** If the command produced incorrect output, the seal faithfully records that incorrect output.
 - **Whether the agent's code changes are correct.** The diff captured in `git_diff.patch` shows what changed, but correctness requires human review.
-- **Whether secrets were exposed.** The recorder captures stdout and stderr. If a command prints an API key, that key will be in `stdout.txt`. Run `scripts/check-secrets.ps1` or `scripts/check-secrets.sh` before sharing session archives.
+- **Whether secrets were exposed.** The recorder captures stdout and stderr verbatim. If a command outputs an API key or token, that value will be in `stdout.txt`. Always run the no-secrets scan (`scripts/check-secrets.ps1` / `scripts/check-secrets.sh`) before sharing session archives.
 - **Whether the recording machine was trusted.** If the host system was compromised, an attacker could alter files before the seal is computed.
 
 ---
