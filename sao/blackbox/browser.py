@@ -146,9 +146,9 @@ def verify_mission(session_dir: Path) -> dict:
 def extract_archive_to_temp(archive_path: Path) -> Path:
     """Extract *archive_path* into a new temp directory and return its Path.
 
-    The caller owns cleanup (shutil.rmtree or similar).  The temp directory
-    root is returned; use find_session_dir_in_extracted_archive() to locate
-    the session sub-folder inside it.
+    The returned directory is a Path inside a tempfile.mkdtemp() directory.
+    Use find_session_dir_in_extracted_archive() to locate the session folder
+    inside it.  Lifetime management is the caller's responsibility.
     """
     tmp = Path(tempfile.mkdtemp(prefix="sao_verify_"))
     with zipfile.ZipFile(archive_path, "r") as zf:
@@ -206,7 +206,7 @@ def verify_archive_file(archive_path: Path) -> dict:
 
     Flow:
       1. Hash the provided archive file → compare to archive_sha256 in seal.json.
-      2. Extract the archive to a temp directory.
+      2. Extract the archive to a temporary directory (auto-cleaned on return).
       3. Verify manifest_sha256 from the extracted manifest.json.
       4. Verify session_directory_sha256 from the extracted session content
          (uses the same sha256_directory function and exclusions as the recorder).
@@ -214,9 +214,8 @@ def verify_archive_file(archive_path: Path) -> dict:
     seal.json is located automatically: first from the session folder alongside
     the archive, then from a companion ``<archive>.seal.json`` file.
 
-    Returns a result dict (same shape as verify_mission()) plus 'temp_dir' (Path).
-    The temp directory is NOT cleaned up here — the caller owns cleanup so it
-    can print results before the files disappear.
+    Returns the same shape dict as verify_mission() (no temp_dir key — the
+    temp directory is cleaned up before this function returns).
     """
     archive_path = archive_path.resolve()
 
@@ -232,12 +231,14 @@ def verify_archive_file(archive_path: Path) -> dict:
     seal = _find_seal_for_archive(archive_path)
     mission_id = seal.get("mission_id", archive_path.stem)
 
-    # Extract the archive so we can verify manifest and directory hashes.
-    temp_dir = extract_archive_to_temp(archive_path)
-    session_dir = find_session_dir_in_extracted_archive(temp_dir)
+    # Extract the archive, verify hashes, then let the context manager clean up.
+    with tempfile.TemporaryDirectory(prefix="sao_verify_") as tmp:
+        with zipfile.ZipFile(archive_path, "r") as zf:
+            zf.extractall(tmp)
+        session_dir = find_session_dir_in_extracted_archive(Path(tmp))
 
-    computed_manifest  = sha256_file(session_dir / "manifest.json")
-    computed_directory = sha256_directory(session_dir)
+        computed_manifest  = sha256_file(session_dir / "manifest.json")
+        computed_directory = sha256_directory(session_dir)
 
     archive_ok   = computed_archive   == seal.get("archive_sha256")
     manifest_ok  = computed_manifest  == seal.get("manifest_sha256")
@@ -251,7 +252,6 @@ def verify_archive_file(archive_path: Path) -> dict:
         "archive_ok":           archive_ok,
         "session_directory_ok": directory_ok,
         "verified":             verified,
-        "temp_dir":             temp_dir,
         "detail": {
             "archive_computed":   computed_archive,
             "archive_stored":     seal.get("archive_sha256"),

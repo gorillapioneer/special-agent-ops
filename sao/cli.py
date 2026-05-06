@@ -199,8 +199,6 @@ def cmd_verify(args) -> int:
 # ── verify-archive ───────────────────────────────────────────────────────────
 
 def cmd_verify_archive(args) -> int:
-    import shutil
-
     archive_path = Path(args.archive_path).resolve()
 
     try:
@@ -230,9 +228,6 @@ def cmd_verify_archive(args) -> int:
         print("  Result: FAILED")
     print(bar)
     print()
-
-    # Clean up temp extraction directory now that we've printed the result.
-    shutil.rmtree(result["temp_dir"], ignore_errors=True)
 
     return 0 if result["verified"] else 1
 
