@@ -196,6 +196,47 @@ def cmd_verify(args) -> int:
     return 0 if result["verified"] else 1
 
 
+# ── verify-archive ───────────────────────────────────────────────────────────
+
+def cmd_verify_archive(args) -> int:
+    import shutil
+
+    archive_path = Path(args.archive_path).resolve()
+
+    try:
+        result = browser.verify_archive_file(archive_path)
+    except (FileNotFoundError, ValueError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+    def _ok(flag: bool) -> str:
+        return "OK" if flag else "FAILED"
+
+    width = 64
+    bar = "=" * width
+    print()
+    print(bar)
+    print("  SPECIAL AGENT OPS — VERIFY ARCHIVE")
+    print(bar)
+    print(f"  Archive:           {result['archive_path']}")
+    print(f"  Mission ID:        {result['mission_id']}")
+    print(f"  Archive SHA256:    {_ok(result['archive_ok'])}")
+    print(f"  Manifest:          {_ok(result['manifest_ok'])}")
+    print(f"  Session Directory: {_ok(result['session_directory_ok'])}")
+    print(bar)
+    if result["verified"]:
+        print("  Result: VERIFIED")
+    else:
+        print("  Result: FAILED")
+    print(bar)
+    print()
+
+    # Clean up temp extraction directory now that we've printed the result.
+    shutil.rmtree(result["temp_dir"], ignore_errors=True)
+
+    return 0 if result["verified"] else 1
+
+
 # ── Parser ────────────────────────────────────────────────────────────────────
 
 def build_parser() -> argparse.ArgumentParser:
@@ -205,10 +246,11 @@ def build_parser() -> argparse.ArgumentParser:
             "Special Agent Ops — black box recorder and mission browser.\n"
             "\n"
             "Commands:\n"
-            "  run     Record a command as a mission session.\n"
-            "  list    List all recorded missions.\n"
-            "  show    Inspect a mission session.\n"
-            "  verify  Verify SHA256 seals for a mission session.\n"
+            "  run             Record a command as a mission session.\n"
+            "  list            List all recorded missions.\n"
+            "  show            Inspect a mission session.\n"
+            "  verify          Verify SHA256 seals for a mission session.\n"
+            "  verify-archive  Verify a mission .zip archive directly.\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -258,6 +300,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     verify_p.add_argument("mission_id", help="Mission ID to verify.")
     verify_p.set_defaults(func=cmd_verify)
+
+    # ── verify-archive ────────────────────────────────────────────────────────
+    va_p = sub.add_parser(
+        "verify-archive",
+        help="Verify a mission .zip archive directly.",
+        description=(
+            "Extract a mission archive to a temp folder and verify all SHA256 seals.\n"
+            "The original session folder is not required."
+        ),
+    )
+    va_p.add_argument(
+        "archive_path",
+        help="Path to the mission .zip archive, e.g. blackbox/sessions/20260506_091500_pytest_baseline.zip",
+    )
+    va_p.set_defaults(func=cmd_verify_archive)
 
     return parser
 

@@ -1,13 +1,16 @@
 """
 browser.py — list, inspect, and verify recorded mission sessions.
 
-All functions work against the blackbox/sessions/ directory tree.
+All functions work against the blackbox/sessions/ directory tree, or
+directly against a .zip archive (via verify_archive_file).
 No external dependencies — stdlib only.
 """
 
 from __future__ import annotations
 
 import json
+import tempfile
+import zipfile
 from pathlib import Path
 
 from .seal import sha256_file, sha256_directory
@@ -134,5 +137,127 @@ def verify_mission(session_dir: Path) -> dict:
             "archive_stored":      seal.get("archive_sha256"),
             "directory_computed":  computed_directory,
             "directory_stored":    seal.get("session_directory_sha256"),
+        },
+    }
+
+
+# ── Archive verification ──────────────────────────────────────────────────────
+
+def extract_archive_to_temp(archive_path: Path) -> Path:
+    """Extract *archive_path* into a new temp directory and return its Path.
+
+    The caller owns cleanup (shutil.rmtree or similar).  The temp directory
+    root is returned; use find_session_dir_in_extracted_archive() to locate
+    the session sub-folder inside it.
+    """
+    tmp = Path(tempfile.mkdtemp(prefix="sao_verify_"))
+    with zipfile.ZipFile(archive_path, "r") as zf:
+        zf.extractall(tmp)
+    return tmp
+
+
+def find_session_dir_in_extracted_archive(temp_dir: Path) -> Path:
+    """Return the single session sub-directory inside *temp_dir*.
+
+    Mission archives always extract into one top-level folder named after the
+    mission ID.  Raises FileNotFoundError if no such folder is found.
+    """
+    candidates = [p for p in temp_dir.iterdir() if p.is_dir()]
+    if not candidates:
+        raise FileNotFoundError(
+            f"No session directory found inside extracted archive at {temp_dir}"
+        )
+    return candidates[0]
+
+
+def _find_seal_for_archive(archive_path: Path) -> dict:
+    """Locate and return the seal dict for *archive_path*.
+
+    Search order:
+      1. Session folder alongside the archive:
+         ``<sessions_dir>/<archive_stem>/seal.json``
+      2. Companion file next to the archive:
+         ``<archive_path>.seal.json``  (e.g. for portable distribution)
+
+    Raises FileNotFoundError with a helpful message if neither is found.
+    """
+    # 1. Session folder (the usual case — session folder still present)
+    session_seal = archive_path.parent / archive_path.stem / "seal.json"
+    if session_seal.exists():
+        return _load_json(session_seal, "seal")
+
+    # 2. Portable companion file
+    companion = archive_path.with_suffix(".seal.json")
+    if companion.exists():
+        return _load_json(companion, "seal")
+
+    raise FileNotFoundError(
+        f"seal.json not found for archive: {archive_path}\n"
+        f"Checked:\n"
+        f"  {session_seal}\n"
+        f"  {companion}\n"
+        f"To verify portably, distribute the archive with its seal.json:\n"
+        f"  cp <session_dir>/seal.json <archive_path>.seal.json"
+    )
+
+
+def verify_archive_file(archive_path: Path) -> dict:
+    """Verify a mission .zip archive, with or without the session folder.
+
+    Flow:
+      1. Hash the provided archive file → compare to archive_sha256 in seal.json.
+      2. Extract the archive to a temp directory.
+      3. Verify manifest_sha256 from the extracted manifest.json.
+      4. Verify session_directory_sha256 from the extracted session content
+         (uses the same sha256_directory function and exclusions as the recorder).
+
+    seal.json is located automatically: first from the session folder alongside
+    the archive, then from a companion ``<archive>.seal.json`` file.
+
+    Returns a result dict (same shape as verify_mission()) plus 'temp_dir' (Path).
+    The temp directory is NOT cleaned up here — the caller owns cleanup so it
+    can print results before the files disappear.
+    """
+    archive_path = archive_path.resolve()
+
+    if not archive_path.exists():
+        raise FileNotFoundError(f"Archive not found: {archive_path}")
+    if not zipfile.is_zipfile(archive_path):
+        raise ValueError(f"Not a valid zip file: {archive_path}")
+
+    # Hash the original archive file — must match seal's archive_sha256.
+    computed_archive = sha256_file(archive_path)
+
+    # Find seal.json (session folder or companion file).
+    seal = _find_seal_for_archive(archive_path)
+    mission_id = seal.get("mission_id", archive_path.stem)
+
+    # Extract the archive so we can verify manifest and directory hashes.
+    temp_dir = extract_archive_to_temp(archive_path)
+    session_dir = find_session_dir_in_extracted_archive(temp_dir)
+
+    computed_manifest  = sha256_file(session_dir / "manifest.json")
+    computed_directory = sha256_directory(session_dir)
+
+    archive_ok   = computed_archive   == seal.get("archive_sha256")
+    manifest_ok  = computed_manifest  == seal.get("manifest_sha256")
+    directory_ok = computed_directory == seal.get("session_directory_sha256")
+    verified     = archive_ok and manifest_ok and directory_ok
+
+    return {
+        "mission_id":           mission_id,
+        "archive_path":         archive_path,
+        "manifest_ok":          manifest_ok,
+        "archive_ok":           archive_ok,
+        "session_directory_ok": directory_ok,
+        "verified":             verified,
+        "temp_dir":             temp_dir,
+        "detail": {
+            "archive_computed":   computed_archive,
+            "archive_stored":     seal.get("archive_sha256"),
+            "manifest_computed":  computed_manifest,
+            "manifest_stored":    seal.get("manifest_sha256"),
+            "directory_computed": computed_directory,
+            "directory_stored":   seal.get("session_directory_sha256"),
         },
     }
