@@ -60,6 +60,7 @@ def _print_banner(result: dict) -> None:
     print(f"  Seal Card:       {result.get('seal_card_path', 'n/a')}")
     print(f"  HTML Card:       {result.get('html_card_path', 'n/a')}")
     print(f"  QR Payload:      {result.get('qr_payload_json_path', 'n/a')}")
+    print(f"  QR Image:        {result.get('qr_image_path', 'n/a')}")
     print(bar)
     print()
 
@@ -150,6 +151,7 @@ def cmd_show(args) -> int:
     print(f"  Seal Card:        {session_dir / 'seal_card.md'}")
     print(f"  Mission Summary:  {session_dir / 'mission_summary.md'}")
     print(f"  QR Payload:       {session_dir / 'seal_qr_payload.txt'}")
+    print(f"  QR Image:         {browser.get_qr_image_path(session_dir)}")
     print(bar)
     print()
     return 0

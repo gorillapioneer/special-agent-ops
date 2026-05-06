@@ -64,7 +64,7 @@ If you are recording agent-generated commands, review the command string before 
 `sao dashboard` starts an HTTP server with the following constraints:
 
 - **Loopback only.** The server binds to `127.0.0.1`. It is not accessible from other machines on the network.
-- **Allowlisted files only.** Only three filenames can ever be served: `seal_card.html`, `mission_summary.md`, and `seal_qr_payload.txt`.
+- **Allowlisted files only.** Only four filenames can ever be served: `seal_card.html`, `mission_summary.md`, `seal_qr_payload.txt`, and `seal_qr.png`.
 - **Validated session folders only.** The mission ID in the URL is validated against actual directories in `blackbox/sessions/`. Path traversal sequences (`..`, `/`, `\`) are rejected before any filesystem access.
 - **No arbitrary file access.** There is no route that serves an arbitrary path. The server has no equivalent of a static file middleware.
 
@@ -97,8 +97,10 @@ It intentionally excludes:
 - File paths (machine-specific, not useful out of context)
 - stdout/stderr content (too large for a QR code)
 - Changed file lists (too large, available in the session folder)
+- Git diffs (too large and may contain sensitive code or configuration)
+- Secrets (the QR is designed to avoid stdout, stderr, diffs, and archive contents)
 
-The payload is proof-of-record, not a full record. The full record is in the session folder and archive.
+`seal_qr.png` is generated from this same compact payload. It is a lookup/proof marker, not compression: scanning it does not reconstruct the black box archive and does not reveal stdout, stderr, diffs, secrets, or the archive. The full record is in the session folder and archive.
 
 ---
 

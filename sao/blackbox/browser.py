@@ -97,6 +97,11 @@ def load_qr_payload(session_dir: Path) -> dict:
     return json.loads(txt_path.read_text(encoding="utf-8"))
 
 
+def get_qr_image_path(session_dir: Path) -> Path:
+    """Return the generated seal_qr.png path for *session_dir*."""
+    return session_dir / "seal_qr.png"
+
+
 # ── Verification ──────────────────────────────────────────────────────────────
 
 def verify_mission(session_dir: Path) -> dict:

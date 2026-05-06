@@ -35,6 +35,7 @@ _DIR_HASH_EXCLUDE = {
     "seal_payload.json",
     "seal_qr_payload.json",
     "seal_qr_payload.txt",
+    "seal_qr.png",
     "mission_summary.md",
 }
 

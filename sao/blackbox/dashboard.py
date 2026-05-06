@@ -2,7 +2,7 @@
 dashboard.py — local mini dashboard for recorded mission sessions.
 
 Starts a tiny HTTP server on 127.0.0.1 that lists all missions and
-serves their HTML cards, summaries, and QR payloads through known,
+serves their HTML cards, summaries, QR payloads, and QR images through known,
 validated routes.  No arbitrary file access is possible.
 
 Routes:
@@ -10,6 +10,7 @@ Routes:
     /missions/<id>/card            seal_card.html
     /missions/<id>/summary         mission_summary.md (wrapped in HTML)
     /missions/<id>/qr-payload      seal_qr_payload.txt
+    /missions/<id>/qr-image        seal_qr.png
 
 Stdlib only — no external dependencies.
 """
@@ -28,12 +29,14 @@ _ROUTE_TO_FILE = {
     "card":       "seal_card.html",
     "summary":    "mission_summary.md",
     "qr-payload": "seal_qr_payload.txt",
+    "qr-image":   "seal_qr.png",
 }
 
 _CONTENT_TYPE = {
     "seal_card.html":       "text/html; charset=utf-8",
     "mission_summary.md":   "text/plain; charset=utf-8",
     "seal_qr_payload.txt":  "text/plain; charset=utf-8",
+    "seal_qr.png":          "image/png",
 }
 
 _BG    = "#0d1117"
@@ -74,6 +77,8 @@ def _render_index(sessions_root: Path) -> str:
           <a href="/missions/{mid}/summary">summary</a>
           &bull;
           <a href="/missions/{mid}/qr-payload">qr</a>
+          &bull;
+          <a href="/missions/{mid}/qr-image">qr image</a>
         </td>
       </tr>""")
         table_body = "".join(rows)
