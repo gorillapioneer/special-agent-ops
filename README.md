@@ -1,6 +1,7 @@
 <p align="center">
   <img src="assets/special-agent-ops-banner.svg" alt="Special Agent Ops - Mission control for AI coding agents" width="100%">
 </p>
+
 # Special Agent Ops
 
 [![Safety checks](https://github.com/gorillapioneer/special-agent-ops/actions/workflows/safety-checks.yml/badge.svg)](https://github.com/gorillapioneer/special-agent-ops/actions/workflows/safety-checks.yml)
@@ -8,6 +9,95 @@
 > **Mission control for AI coding agents: give every agent a mission, a boundary, a review gate, and an off switch.**
 
 A practical control kit for coordinating AI coding agents without handing them the keys to the whole codebase.
+
+---
+
+## Black Box Recorder — CLI
+
+Record everything an AI coding agent does in a session: git state, command output, changed files, and a compressed archive you can replay or audit later.
+
+```bash
+# Run any command and record it as a mission
+python -m sao.cli run --name "pytest baseline" --command "python -m pytest"
+```
+
+Output:
+
+```
+========================================================
+  SPECIAL AGENT OPS — MISSION COMPLETE
+========================================================
+  Mission ID:     20260506_091500_pytest_baseline
+  Command:        python -m pytest
+  Exit Code:      0
+  Changed Files:  2
+  Session Folder: blackbox/sessions/20260506_091500_pytest_baseline
+  Archive:        blackbox/sessions/20260506_091500_pytest_baseline.zip
+========================================================
+```
+
+Each session folder contains:
+
+| File | Contents |
+|---|---|
+| `manifest.json` | Mission metadata, timing, exit code, branch, changed files |
+| `stdout.txt` | Full command stdout |
+| `stderr.txt` | Full command stderr |
+| `git_status_before.txt` | `git status --short` before the command |
+| `git_status_after.txt` | `git status --short` after |
+| `git_diff.patch` | Unified diff of all uncommitted changes |
+| `mission_summary.md` | Human-readable summary of the session |
+
+The whole folder is also compressed to `<mission_id>.zip` for easy archiving.
+
+### Installation
+
+```bash
+# No external dependencies — stdlib only.
+# Option 1: run directly (no install needed)
+python -m sao.cli run --name "my mission" --command "your-command"
+
+# Option 2: install as a CLI tool
+pip install -e .
+sao run --name "my mission" --command "your-command"
+```
+
+### More examples
+
+```bash
+# Record a test run
+python -m sao.cli run --name "unit tests" --command "python -m pytest tests/"
+
+# Record a linting pass
+python -m sao.cli run --name "lint check" --command "python -m ruff check ."
+
+# Record any shell command — Windows PowerShell example
+python -m sao.cli run --name "build check" --command "npm run build"
+```
+
+Sessions are stored under `blackbox/sessions/` (excluded from git by `.gitignore`).
+Source: [`sao/`](sao/)
+
+### Mission Seal
+
+Each mission generates a SHA256 seal so you can verify the archive has not been changed after recording.
+
+```
+SPECIAL AGENT OPS MISSION SEAL
+Mission ID: 20260506_091500_pytest_baseline
+Created At: 2026-05-06T09:15:05.123456+00:00
+Manifest SHA256: e3b0c44298fc1c14...
+Archive SHA256:  a665a45920422f9d...
+Session Directory SHA256: 2cf24dba5fb0a30e...
+Seal Version: 0.2
+```
+
+The seal covers:
+- **manifest_sha256** — the mission metadata file
+- **archive_sha256** — the compressed `.zip` archive
+- **session_directory_sha256** — a combined hash of every raw data file in the session folder
+
+To verify an archive manually: compare its SHA256 against `archive_sha256` in `seal.json` or `seal.txt`.
 
 ---
 

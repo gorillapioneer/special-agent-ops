@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=70"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "special-agent-ops"
+version = "0.1.0"
+description = "Black box recorder for AI coding agent sessions."
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+
+# No external runtime dependencies — stdlib only.
+
+[project.scripts]
+# After `pip install -e .` you can use `sao run ...` directly.
+sao = "sao.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["sao*"]
