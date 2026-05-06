@@ -46,6 +46,12 @@ Each session folder contains:
 | `git_status_before.txt` | `git status --short` before the command |
 | `git_status_after.txt` | `git status --short` after |
 | `git_diff.patch` | Unified diff of all uncommitted changes |
+| `seal.json` | SHA256 tamper-evident seal (machine-readable) |
+| `seal.txt` | SHA256 tamper-evident seal (human-readable) |
+| `seal_payload.json` | Compact mission card payload |
+| `seal_card.md` | Shareable Markdown mission card |
+| `seal_qr_payload.json` | Compact QR-ready payload (no whitespace JSON) |
+| `seal_qr_payload.txt` | Same compact QR payload as plain text |
 | `mission_summary.md` | Human-readable summary of the session |
 
 The whole folder is also compressed to `<mission_id>.zip` for easy archiving.
@@ -130,6 +136,27 @@ Seal Version: 0.2
 
 Recorded by Special Agent Ops.
 ```
+
+### QR Seal Payload
+
+Each mission also creates a compact QR-ready payload — a minimal JSON snapshot sized to fit inside a standard QR code.
+
+**`seal_qr_payload.json`** and **`seal_qr_payload.txt`** — identical compact JSON, no whitespace:
+```
+{"sao":"0.4","id":"20260506_091500_pytest_baseline","status":"PASS","sha256":"a665a45920422f9d...","seal":"0.2"}
+```
+
+Fields:
+
+| Key | Value |
+|---|---|
+| `sao` | QR payload version (`"0.4"`) |
+| `id` | Mission ID |
+| `status` | `"PASS"` or `"FAIL"` |
+| `sha256` | Archive SHA256 (full 64-char hex) |
+| `seal` | Seal version from `seal.json` |
+
+No QR image is generated — the payload file is the input. Point any QR encoder at `seal_qr_payload.txt` to produce a scannable code.
 
 ---
 
