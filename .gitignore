@@ -69,3 +69,6 @@ coverage/
 .coverage
 htmlcov/
 *.log
+
+# Black box recorder — session data (large, machine-generated)
+blackbox/sessions/
