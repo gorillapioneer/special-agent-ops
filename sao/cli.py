@@ -1,14 +1,11 @@
 """
 cli.py — Special Agent Ops command-line interface.
 
-Run a shell command and record everything about it:
-  git state, stdout, stderr, changed files, and a compressed archive.
-
-Usage:
-    python -m sao.cli run --name "my mission" --command "pytest"
-
-    # or, after `pip install -e .`:
+Commands:
     sao run --name "my mission" --command "pytest"
+    sao list
+    sao show <mission_id>
+    sao verify <mission_id>
 """
 
 import argparse
@@ -16,9 +13,10 @@ import sys
 from pathlib import Path
 
 from sao.blackbox.recorder import record_mission
+from sao.blackbox import browser
 
 
-# ── Sub-commands ──────────────────────────────────────────────────────────────
+# ── run ───────────────────────────────────────────────────────────────────────
 
 def cmd_run(args) -> int:
     """Record one mission and print the result summary."""
@@ -40,7 +38,6 @@ def _print_banner(result: dict) -> None:
     width = 64
     bar = "=" * width
     archive_sha256 = result.get("archive_sha256", "")
-    # Show first 16 + last 8 chars so it fits in a narrow terminal.
     sha_display = (
         f"{archive_sha256[:16]}...{archive_sha256[-8:]}"
         if len(archive_sha256) == 64
@@ -66,23 +63,159 @@ def _print_banner(result: dict) -> None:
     print()
 
 
+# ── list ──────────────────────────────────────────────────────────────────────
+
+def cmd_list(args) -> int:
+    sessions_root = browser.get_sessions_root(Path.cwd())
+    missions = browser.list_missions(sessions_root)
+
+    if not missions:
+        print("No missions recorded yet.")
+        print(f"Sessions directory: {sessions_root}")
+        return 0
+
+    # Column widths
+    id_w  = max(len("Mission ID"),  max(len(m["mission_id"]) for m in missions))
+    st_w  = max(len("Status"),      max(len(m["status"])     for m in missions))
+    ch_w  = max(len("Changed"),     max(len(str(m["changed_files_count"])) for m in missions))
+    cmd_w = max(len("Command"),     min(40, max(len(m["command"]) for m in missions)))
+
+    header = (
+        f"{'Mission ID':<{id_w}}  {'Status':<{st_w}}  {'Changed':>{ch_w}}  "
+        f"{'Command':<{cmd_w}}"
+    )
+    sep = "-" * len(header)
+    print()
+    print(header)
+    print(sep)
+    for m in missions:
+        cmd_display = m["command"] if len(m["command"]) <= cmd_w else m["command"][:cmd_w - 3] + "..."
+        print(
+            f"{m['mission_id']:<{id_w}}  "
+            f"{m['status']:<{st_w}}  "
+            f"{str(m['changed_files_count']):>{ch_w}}  "
+            f"{cmd_display:<{cmd_w}}"
+        )
+    print()
+    print(f"  {len(missions)} mission(s) in {sessions_root}")
+    print()
+    return 0
+
+
+# ── show ──────────────────────────────────────────────────────────────────────
+
+def cmd_show(args) -> int:
+    sessions_root = browser.get_sessions_root(Path.cwd())
+    try:
+        session_dir = browser.find_mission(sessions_root, args.mission_id)
+    except FileNotFoundError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+    try:
+        m = browser.load_manifest(session_dir)
+    except FileNotFoundError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+    exit_code = m.get("exit_code", -1)
+    status = "PASS" if exit_code == 0 else "FAIL"
+
+    width = 64
+    bar = "=" * width
+    print()
+    print(bar)
+    print("  SPECIAL AGENT OPS — MISSION DETAIL")
+    print(bar)
+    print(f"  Mission ID:       {m.get('mission_id', '?')}")
+    print(f"  Name:             {m.get('name', '?')}")
+    print(f"  Status:           {status}")
+    print(f"  Started:          {m.get('started_at', '?')}")
+    print(f"  Ended:            {m.get('ended_at', '?')}")
+    print(f"  Duration:         {m.get('duration_seconds', '?')}s")
+    print(f"  Command:          {m.get('command', '?')}")
+    print(f"  Exit Code:        {exit_code}")
+    print(f"  Changed Files:    {m.get('changed_files_count', '?')}")
+
+    # Seal for archive SHA256
+    try:
+        seal = browser.load_seal(session_dir)
+        sha = seal.get("archive_sha256", "?")
+        sha_display = f"{sha[:16]}...{sha[-8:]}" if len(sha) == 64 else sha
+        print(f"  Archive SHA256:   {sha_display}")
+    except FileNotFoundError:
+        print(f"  Archive SHA256:   (seal.json not found)")
+
+    print(f"  Seal Card:        {session_dir / 'seal_card.md'}")
+    print(f"  Mission Summary:  {session_dir / 'mission_summary.md'}")
+    print(f"  QR Payload:       {session_dir / 'seal_qr_payload.txt'}")
+    print(bar)
+    print()
+    return 0
+
+
+# ── verify ────────────────────────────────────────────────────────────────────
+
+def cmd_verify(args) -> int:
+    sessions_root = browser.get_sessions_root(Path.cwd())
+    try:
+        session_dir = browser.find_mission(sessions_root, args.mission_id)
+    except FileNotFoundError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+    try:
+        result = browser.verify_mission(session_dir)
+    except FileNotFoundError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+    def _ok(flag: bool) -> str:
+        return "OK" if flag else "FAILED"
+
+    width = 64
+    bar = "=" * width
+    print()
+    print(bar)
+    print("  SPECIAL AGENT OPS — VERIFY")
+    print(bar)
+    print(f"  Mission ID:        {result['mission_id']}")
+    print(f"  Manifest:          {_ok(result['manifest_ok'])}")
+    print(f"  Archive:           {_ok(result['archive_ok'])}")
+    print(f"  Session Directory: {_ok(result['session_directory_ok'])}")
+    print(bar)
+    if result["verified"]:
+        print("  Result: VERIFIED")
+    else:
+        print("  Result: FAILED")
+        if not result["archive_found"]:
+            print("  (archive .zip not found alongside session directory)")
+    print(bar)
+    print()
+
+    return 0 if result["verified"] else 1
+
+
 # ── Parser ────────────────────────────────────────────────────────────────────
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="sao",
         description=(
-            "Special Agent Ops — black box recorder for AI coding agent sessions.\n"
+            "Special Agent Ops — black box recorder and mission browser.\n"
             "\n"
-            "Records git state, command output, and changed files, then compresses\n"
-            "everything into a timestamped archive under blackbox/sessions/."
+            "Commands:\n"
+            "  run     Record a command as a mission session.\n"
+            "  list    List all recorded missions.\n"
+            "  show    Inspect a mission session.\n"
+            "  verify  Verify SHA256 seals for a mission session.\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
     sub = parser.add_subparsers(dest="subcommand", required=True)
 
-    # ── `run` sub-command ─────────────────────────────────────────────────────
+    # ── run ───────────────────────────────────────────────────────────────────
     run_p = sub.add_parser(
         "run",
         help="Run a command and record a mission session.",
@@ -99,6 +232,32 @@ def build_parser() -> argparse.ArgumentParser:
         help='Shell command to execute and record, e.g. "python -m pytest".',
     )
     run_p.set_defaults(func=cmd_run)
+
+    # ── list ──────────────────────────────────────────────────────────────────
+    list_p = sub.add_parser(
+        "list",
+        help="List all recorded mission sessions.",
+        description="Print a compact table of all missions in blackbox/sessions/.",
+    )
+    list_p.set_defaults(func=cmd_list)
+
+    # ── show ──────────────────────────────────────────────────────────────────
+    show_p = sub.add_parser(
+        "show",
+        help="Show details for a recorded mission.",
+        description="Print full metadata for a specific mission session.",
+    )
+    show_p.add_argument("mission_id", help="Mission ID, e.g. 20260506_091500_pytest_baseline")
+    show_p.set_defaults(func=cmd_show)
+
+    # ── verify ────────────────────────────────────────────────────────────────
+    verify_p = sub.add_parser(
+        "verify",
+        help="Verify SHA256 seals for a mission session.",
+        description="Recompute and confirm manifest, archive, and session directory hashes.",
+    )
+    verify_p.add_argument("mission_id", help="Mission ID to verify.")
+    verify_p.set_defaults(func=cmd_verify)
 
     return parser
 
