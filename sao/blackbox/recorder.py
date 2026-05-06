@@ -5,7 +5,7 @@ Flow:
     1.  Generate a unique mission_id from timestamp + sanitised name.
     2.  Create the session folder under blackbox/sessions/.
     3.  Capture git state *before* running the command.
-    4.  Run the command with subprocess (shell=True for cross-platform support).
+    4.  Run the command with subprocess.
     5.  Capture git state *after*.
     6.  Write raw artefacts (manifest.json, stdout.txt, git_diff.patch, …).
     7.  Compress the session folder into a .zip archive.
@@ -18,6 +18,7 @@ QR image generation uses the qrcode[pil] runtime dependency.
 """
 
 import json
+import os
 import re
 import subprocess
 from datetime import datetime, timezone
@@ -41,7 +42,17 @@ def _make_mission_id(name: str) -> str:
     return f"{ts}_{_sanitise_name(name)}"
 
 
-def _run_command(command: str, cwd=None):
+def format_command_argv(command_argv: list[str]) -> str:
+    """Return a readable command string for an argv list."""
+    if os.name == "nt":
+        return subprocess.list2cmdline(command_argv)
+
+    import shlex
+
+    return shlex.join(command_argv)
+
+
+def _run_shell_command(command: str, cwd=None):
     """Execute *command* in a shell. Returns (stdout, stderr, exit_code).
 
     shell=True is intentional here: the caller provides the full shell command
@@ -63,16 +74,41 @@ def _run_command(command: str, cwd=None):
         return "", f"Failed to start command: {exc}", 1
 
 
+def _run_argv_command(command_argv: list[str], cwd=None):
+    """Execute *command_argv* without a shell. Returns stdout, stderr, exit_code."""
+    try:
+        proc = subprocess.run(
+            command_argv,
+            shell=False,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        return proc.stdout, proc.stderr, proc.returncode
+    except Exception as exc:
+        return "", f"Failed to start command: {exc}", 1
+
+
 # ── Public API ────────────────────────────────────────────────────────────────
 
-def record_mission(name: str, command: str, repo_path: Path = None) -> dict:
+def _record_mission(
+    name: str,
+    command: str,
+    repo_path: Path | None = None,
+    command_mode: str = "shell",
+    command_argv: list[str] | None = None,
+) -> dict:
     """Run *command*, record everything, and return a result dict.
 
     Parameters
     ----------
     name:       Human-readable label for this mission (used in mission_id).
-    command:    Shell command to execute (e.g. ``"python -m pytest"``).
-    repo_path:  Root directory of the project; defaults to the current directory.
+    command:       Readable command string for display and manifests.
+    repo_path:     Root directory of the project; defaults to the current directory.
+    command_mode:  ``"shell"`` for shell-string commands, ``"argv"`` for list commands.
+    command_argv:  Argument list used when command_mode is ``"argv"``.
 
     Returns
     -------
@@ -83,6 +119,10 @@ def record_mission(name: str, command: str, repo_path: Path = None) -> dict:
     """
     if repo_path is None:
         repo_path = Path.cwd()
+    if command_mode not in {"shell", "argv"}:
+        raise ValueError(f"Unsupported command_mode: {command_mode}")
+    if command_mode == "argv" and not command_argv:
+        raise ValueError("command_argv is required when command_mode is 'argv'")
 
     mission_id = _make_mission_id(name)
     sessions_dir = repo_path / "blackbox" / "sessions"
@@ -100,7 +140,13 @@ def record_mission(name: str, command: str, repo_path: Path = None) -> dict:
 
     # ── Run the command ───────────────────────────────────────────────────────
     started_at = datetime.now(timezone.utc)
-    stdout_text, stderr_text, exit_code = _run_command(command, cwd=repo_path)
+    if command_mode == "argv":
+        stdout_text, stderr_text, exit_code = _run_argv_command(
+            command_argv,
+            cwd=repo_path,
+        )
+    else:
+        stdout_text, stderr_text, exit_code = _run_shell_command(command, cwd=repo_path)
     ended_at = datetime.now(timezone.utc)
     duration_seconds = (ended_at - started_at).total_seconds()
 
@@ -118,6 +164,7 @@ def record_mission(name: str, command: str, repo_path: Path = None) -> dict:
         "name": name,
         "repo_path": str(repo_path),
         "command": command,
+        "command_mode": command_mode,
         "started_at": started_at.isoformat(),
         "ended_at": ended_at.isoformat(),
         "duration_seconds": round(duration_seconds, 3),
@@ -128,6 +175,8 @@ def record_mission(name: str, command: str, repo_path: Path = None) -> dict:
         "changed_files_count": len(changed_files),
         "changed_files": changed_files,
     }
+    if command_mode == "argv":
+        manifest["command_argv"] = command_argv
 
     # ── Write raw artefacts (no summary yet — seal comes first) ──────────────
     manifest_path = session_dir / "manifest.json"
@@ -204,6 +253,8 @@ def record_mission(name: str, command: str, repo_path: Path = None) -> dict:
         "mission_id":           mission_id,
         "name":                 name,
         "command":              command,
+        "command_mode":         command_mode,
+        "command_argv":         command_argv,
         "exit_code":            exit_code,
         "status":               status,
         "changed_files_count":  len(changed_files),
@@ -218,3 +269,29 @@ def record_mission(name: str, command: str, repo_path: Path = None) -> dict:
         "qr_image_path":        qr_image_path,
         "html_card_path":       html_card_path,
     }
+
+
+def record_mission(name: str, command: str, repo_path: Path = None) -> dict:
+    """Run a shell command string, record everything, and return a result dict."""
+    return _record_mission(
+        name=name,
+        command=command,
+        repo_path=repo_path,
+        command_mode="shell",
+    )
+
+
+def record_mission_argv(
+    name: str,
+    command_argv: list[str],
+    repo_path: Path = None,
+) -> dict:
+    """Run an argv command without a shell, record everything, and return a result dict."""
+    command = format_command_argv(command_argv)
+    return _record_mission(
+        name=name,
+        command=command,
+        repo_path=repo_path,
+        command_mode="argv",
+        command_argv=command_argv,
+    )

@@ -3,6 +3,7 @@ cli.py — Special Agent Ops command-line interface.
 
 Commands:
     sao run --name "my mission" --command "pytest"
+    sao wrap --name "my mission" -- pytest
     sao list
     sao show <mission_id>
     sao verify <mission_id>
@@ -12,7 +13,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from sao.blackbox.recorder import record_mission
+from sao.blackbox.recorder import format_command_argv, record_mission, record_mission_argv
 from sao.blackbox import browser, dashboard as dashboard_mod
 
 
@@ -27,6 +28,35 @@ def cmd_run(args) -> int:
     result = record_mission(
         name=args.name,
         command=args.command,
+        repo_path=Path.cwd(),
+    )
+
+    _print_banner(result)
+    return result["exit_code"]
+
+
+def cmd_wrap(args) -> int:
+    """Record one argv command without invoking a shell."""
+    command_argv = list(args.command_argv)
+    if command_argv and command_argv[0] == "--":
+        command_argv = command_argv[1:]
+    if not command_argv:
+        print(
+            'Error: wrap requires a command after "--", e.g. '
+            'sao wrap --name "python version" -- python --version',
+            file=sys.stderr,
+        )
+        return 2
+
+    command_display = format_command_argv(command_argv)
+    print(f"\n  Mission:  {args.name!r}")
+    print(f"  Command:  {command_display}")
+    print(f"  Mode:     argv")
+    print(f"  Working directory: {Path.cwd()}\n")
+
+    result = record_mission_argv(
+        name=args.name,
+        command_argv=command_argv,
         repo_path=Path.cwd(),
     )
 
@@ -51,6 +81,8 @@ def _print_banner(result: dict) -> None:
     print(f"  Mission ID:      {result['mission_id']}")
     print(f"  Status:          {status}")
     print(f"  Command:         {result['command']}")
+    if result.get("command_mode"):
+        print(f"  Command Mode:    {result['command_mode']}")
     print(f"  Exit Code:       {result['exit_code']}")
     print(f"  Changed Files:   {result['changed_files_count']}")
     print(f"  Session Folder:  {result['session_dir']}")
@@ -136,6 +168,8 @@ def cmd_show(args) -> int:
     print(f"  Ended:            {m.get('ended_at', '?')}")
     print(f"  Duration:         {m.get('duration_seconds', '?')}s")
     print(f"  Command:          {m.get('command', '?')}")
+    if m.get("command_mode"):
+        print(f"  Command Mode:     {m.get('command_mode')}")
     print(f"  Exit Code:        {exit_code}")
     print(f"  Changed Files:    {m.get('changed_files_count', '?')}")
 
@@ -288,6 +322,7 @@ def build_parser() -> argparse.ArgumentParser:
             "\n"
             "Commands:\n"
             "  run             Record a command as a mission session.\n"
+            "  wrap            Record an argv command without a shell.\n"
             "  list            List all recorded missions.\n"
             "  show            Inspect a mission session.\n"
             "  open            Open a mission HTML card in the default browser.\n"
@@ -317,6 +352,28 @@ def build_parser() -> argparse.ArgumentParser:
         help='Shell command to execute and record, e.g. "python -m pytest".',
     )
     run_p.set_defaults(func=cmd_run)
+
+    # â”€â”€ wrap â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    wrap_p = sub.add_parser(
+        "wrap",
+        help="Run a command argv list and record a mission session.",
+        description=(
+            "Run a command without shell=True and record everything. Use --\n"
+            "before the wrapped command so its flags are passed through."
+        ),
+    )
+    wrap_p.add_argument(
+        "--name",
+        required=True,
+        help='Human-readable label for this mission, e.g. "codex session".',
+    )
+    wrap_p.add_argument(
+        "command_argv",
+        nargs=argparse.REMAINDER,
+        metavar="COMMAND",
+        help="Command and arguments to execute after --.",
+    )
+    wrap_p.set_defaults(func=cmd_wrap)
 
     # ── list ──────────────────────────────────────────────────────────────────
     list_p = sub.add_parser(
