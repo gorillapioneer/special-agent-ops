@@ -179,6 +179,43 @@ Source: [`sao/blackbox/html_card.py`](sao/blackbox/html_card.py)
 
 ---
 
+## Mini Dashboard
+
+Use `sao dashboard` to open a local dashboard listing recorded missions and links to their mission cards, summaries, and QR payloads.
+
+```bash
+python -m sao.cli dashboard
+# or on a custom port:
+python -m sao.cli dashboard --port 9000
+```
+
+Output:
+
+```
+================================================================
+  SPECIAL AGENT OPS — DASHBOARD
+================================================================
+  URL:            http://127.0.0.1:8765
+  Sessions Root:  blackbox/sessions
+  Press Ctrl+C to stop.
+================================================================
+```
+
+Dashboard routes:
+
+| Route | Serves |
+|---|---|
+| `/` | Mission index — table of all sessions |
+| `/missions/<id>/card` | `seal_card.html` (HTML mission card) |
+| `/missions/<id>/summary` | `mission_summary.md` (plain text) |
+| `/missions/<id>/qr-payload` | `seal_qr_payload.txt` (compact QR JSON) |
+
+The server binds to `127.0.0.1` only (loopback — not exposed to the network). Only the three known files above can be served from validated session folders. No arbitrary file access is possible.
+
+Source: [`sao/blackbox/dashboard.py`](sao/blackbox/dashboard.py)
+
+---
+
 ## Open Mission Card
 
 Use `sao open <mission_id>` to open a recorded mission's standalone HTML card in your default browser.
