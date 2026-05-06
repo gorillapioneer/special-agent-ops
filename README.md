@@ -160,6 +160,59 @@ No QR image is generated — the payload file is the input. Point any QR encoder
 
 ---
 
+## Mission Browser CLI
+
+Inspect and verify recorded sessions without opening any files manually.
+
+```bash
+# List all recorded missions
+python -m sao.cli list
+
+# Inspect a specific mission
+python -m sao.cli show 20260506_091500_pytest_baseline
+
+# Verify SHA256 seals for a mission
+python -m sao.cli verify 20260506_091500_pytest_baseline
+```
+
+### sao list
+
+Prints a compact table of every session in `blackbox/sessions/`, newest first:
+
+```
+Mission ID                          Status  Changed  Command
+-------------------------------------------------------------------
+20260506_091500_pytest_baseline     PASS          0  python --version
+20260506_090000_fail_demo           FAIL          5  python -c "raise SystemExit(42)"
+```
+
+### sao show \<mission_id\>
+
+Prints full metadata for one session: name, status, timing, command, exit code, changed files, archive SHA256, and paths to the seal card, mission summary, and QR payload.
+
+### sao verify \<mission_id\>
+
+Recomputes SHA256 hashes and confirms they match `seal.json`. Uses the same algorithm as the recorder so the result is trustworthy.
+
+```
+================================================================
+  SPECIAL AGENT OPS — VERIFY
+================================================================
+  Mission ID:        20260506_091500_pytest_baseline
+  Manifest:          OK
+  Archive:           OK
+  Session Directory: OK
+================================================================
+  Result: VERIFIED
+================================================================
+```
+
+Exits with code `0` on VERIFIED, `1` on FAILED. Suitable for CI gates.
+
+Source: [`sao/blackbox/browser.py`](sao/blackbox/browser.py)
+
+---
+
 ## How it works
 
 ```
