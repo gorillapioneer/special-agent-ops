@@ -179,6 +179,31 @@ Source: [`sao/blackbox/html_card.py`](sao/blackbox/html_card.py)
 
 ---
 
+## Open Mission Card
+
+Use `sao open <mission_id>` to open a recorded mission's standalone HTML card in your default browser.
+
+```bash
+python -m sao.cli open 20260506_091500_pytest_baseline
+```
+
+Output:
+
+```
+================================================================
+  SPECIAL AGENT OPS — OPEN
+================================================================
+  Mission ID:  20260506_091500_pytest_baseline
+  HTML Card:   .../seal_card.html
+================================================================
+  Result: OPENED
+================================================================
+```
+
+Exits with code `1` if the mission is not found or `seal_card.html` does not exist (e.g. session recorded before v0.7).
+
+---
+
 ## Mission Browser CLI
 
 Inspect and verify recorded sessions without opening any files manually.

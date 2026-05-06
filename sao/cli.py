@@ -197,6 +197,37 @@ def cmd_verify(args) -> int:
     return 0 if result["verified"] else 1
 
 
+# ── open ─────────────────────────────────────────────────────────────────────
+
+def cmd_open(args) -> int:
+    sessions_root = browser.get_sessions_root(Path.cwd())
+    try:
+        session_dir = browser.find_mission(sessions_root, args.mission_id)
+    except FileNotFoundError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+    try:
+        html_path = browser.open_html_card(session_dir)
+    except FileNotFoundError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+    width = 64
+    bar = "=" * width
+    print()
+    print(bar)
+    print("  SPECIAL AGENT OPS — OPEN")
+    print(bar)
+    print(f"  Mission ID:  {args.mission_id}")
+    print(f"  HTML Card:   {html_path}")
+    print(bar)
+    print("  Result: OPENED")
+    print(bar)
+    print()
+    return 0
+
+
 # ── verify-archive ───────────────────────────────────────────────────────────
 
 def cmd_verify_archive(args) -> int:
@@ -245,6 +276,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  run             Record a command as a mission session.\n"
             "  list            List all recorded missions.\n"
             "  show            Inspect a mission session.\n"
+            "  open            Open a mission HTML card in the default browser.\n"
             "  verify          Verify SHA256 seals for a mission session.\n"
             "  verify-archive  Verify a mission .zip archive directly.\n"
         ),
@@ -287,6 +319,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     show_p.add_argument("mission_id", help="Mission ID, e.g. 20260506_091500_pytest_baseline")
     show_p.set_defaults(func=cmd_show)
+
+    # ── open ──────────────────────────────────────────────────────────────────
+    open_p = sub.add_parser(
+        "open",
+        help="Open a mission HTML card in the default browser.",
+        description="Open seal_card.html for a recorded mission in the system default browser.",
+    )
+    open_p.add_argument("mission_id", help="Mission ID to open, e.g. 20260506_091500_pytest_baseline")
+    open_p.set_defaults(func=cmd_open)
 
     # ── verify ────────────────────────────────────────────────────────────────
     verify_p = sub.add_parser(

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import tempfile
+import webbrowser
 import zipfile
 from pathlib import Path
 
@@ -261,3 +262,33 @@ def verify_archive_file(archive_path: Path) -> dict:
             "directory_stored":   seal.get("session_directory_sha256"),
         },
     }
+
+
+# ── HTML card opener ──────────────────────────────────────────────────────────
+
+def get_html_card_path(session_dir: Path) -> Path:
+    """Return the seal_card.html path for *session_dir*.
+
+    Raises FileNotFoundError if the file does not exist (e.g. the session
+    was recorded before v0.7).
+    """
+    html_path = session_dir / "seal_card.html"
+    if not html_path.exists():
+        raise FileNotFoundError(
+            f"HTML card not found: {html_path}\n"
+            f"Re-run the mission with sao >= v0.7 to generate seal_card.html."
+        )
+    return html_path
+
+
+def open_html_card(session_dir: Path) -> Path:
+    """Open the mission HTML card in the default browser.
+
+    Returns the path that was opened.  Raises FileNotFoundError if
+    seal_card.html does not exist.
+    """
+    html_path = get_html_card_path(session_dir)
+    # file:// URI — works on Windows, macOS, and Linux.
+    uri = html_path.resolve().as_uri()
+    webbrowser.open(uri)
+    return html_path
