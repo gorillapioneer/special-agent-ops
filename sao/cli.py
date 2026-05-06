@@ -61,6 +61,7 @@ def _print_banner(result: dict) -> None:
     print(f"  Archive SHA256:  {sha_display}")
     print(f"  Seal:            {result.get('seal_path', 'n/a')}")
     print(f"  Seal Card:       {result.get('seal_card_path', 'n/a')}")
+    print(f"  QR Payload:      {result.get('qr_payload_json_path', 'n/a')}")
     print(bar)
     print()
 

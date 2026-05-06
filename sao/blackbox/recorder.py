@@ -23,7 +23,7 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import compressor, git_tools, seal as seal_mod, seal_card as card_mod, summary
+from . import compressor, git_tools, qr_payload as qr_mod, seal as seal_mod, seal_card as card_mod, summary
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -165,6 +165,9 @@ def record_mission(name: str, command: str, repo_path: Path = None) -> dict:
     )
     card_paths = card_mod.write_seal_card(session_dir=session_dir, payload=payload)
 
+    # ── QR payload (compact JSON for QR encoding) ─────────────────────────────
+    qr_paths = qr_mod.write_qr_payload(session_dir=session_dir, seal_payload=payload)
+
     # ── Summary (written last — references seal hashes and card paths) ────────
     _write(
         "mission_summary.md",
@@ -174,22 +177,25 @@ def record_mission(name: str, command: str, repo_path: Path = None) -> dict:
             stderr_text,
             seal=seal_data,
             card_paths=card_paths,
+            qr_paths=qr_paths,
         ),
     )
 
     status = "PASS" if exit_code == 0 else "FAIL"
 
     return {
-        "mission_id":          mission_id,
-        "name":                name,
-        "command":             command,
-        "exit_code":           exit_code,
-        "status":              status,
-        "changed_files_count": len(changed_files),
-        "session_dir":         session_dir,
-        "zip_path":            zip_path,
-        "seal_path":           seal_path,
-        "archive_sha256":      seal_data["archive_sha256"],
-        "seal_card_path":      card_paths["seal_card_path"],
-        "seal_payload_path":   card_paths["seal_payload_path"],
+        "mission_id":           mission_id,
+        "name":                 name,
+        "command":              command,
+        "exit_code":            exit_code,
+        "status":               status,
+        "changed_files_count":  len(changed_files),
+        "session_dir":          session_dir,
+        "zip_path":             zip_path,
+        "seal_path":            seal_path,
+        "archive_sha256":       seal_data["archive_sha256"],
+        "seal_card_path":       card_paths["seal_card_path"],
+        "seal_payload_path":    card_paths["seal_payload_path"],
+        "qr_payload_json_path": qr_paths["qr_payload_json_path"],
+        "qr_payload_txt_path":  qr_paths["qr_payload_txt_path"],
     }
