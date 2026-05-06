@@ -40,17 +40,19 @@ def _print_banner(result: dict) -> None:
     width = 64
     bar = "=" * width
     archive_sha256 = result.get("archive_sha256", "")
-    # Show first 16 + last 8 chars so it fits the terminal without wrapping.
+    # Show first 16 + last 8 chars so it fits in a narrow terminal.
     sha_display = (
         f"{archive_sha256[:16]}...{archive_sha256[-8:]}"
         if len(archive_sha256) == 64
         else archive_sha256
     )
+    status = result.get("status", "PASS" if result.get("exit_code", 0) == 0 else "FAIL")
     print()
     print(bar)
     print("  SPECIAL AGENT OPS — MISSION COMPLETE")
     print(bar)
     print(f"  Mission ID:      {result['mission_id']}")
+    print(f"  Status:          {status}")
     print(f"  Command:         {result['command']}")
     print(f"  Exit Code:       {result['exit_code']}")
     print(f"  Changed Files:   {result['changed_files_count']}")
@@ -58,6 +60,7 @@ def _print_banner(result: dict) -> None:
     print(f"  Archive:         {result['zip_path']}")
     print(f"  Archive SHA256:  {sha_display}")
     print(f"  Seal:            {result.get('seal_path', 'n/a')}")
+    print(f"  Seal Card:       {result.get('seal_card_path', 'n/a')}")
     print(bar)
     print()
 
