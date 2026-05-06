@@ -211,6 +211,48 @@ Exits with code `0` on VERIFIED, `1` on FAILED. Suitable for CI gates.
 
 Source: [`sao/blackbox/browser.py`](sao/blackbox/browser.py)
 
+### sao verify-archive \<archive_path\>
+
+Verify a mission `.zip` archive directly — no session folder required, as long as `seal.json` is available.
+
+```bash
+python -m sao.cli verify-archive blackbox/sessions/20260506_091500_pytest_baseline.zip
+```
+
+Output:
+
+```
+================================================================
+  SPECIAL AGENT OPS — VERIFY ARCHIVE
+================================================================
+  Archive:           .../20260506_091500_pytest_baseline.zip
+  Mission ID:        20260506_091500_pytest_baseline
+  Archive SHA256:    OK
+  Manifest:          OK
+  Session Directory: OK
+================================================================
+  Result: VERIFIED
+================================================================
+```
+
+Checks performed:
+
+| Check | How |
+|---|---|
+| Archive SHA256 | Recomputes SHA256 of the provided `.zip` file |
+| Manifest | Extracts `manifest.json` from the zip, recomputes its hash |
+| Session Directory | Extracts all data files, recomputes the directory hash |
+
+`seal.json` is located automatically — first from the session folder alongside the archive, then from a companion `<archive>.seal.json` file. To distribute an archive for portable offline verification:
+
+```bash
+# Copy the zip and its seal together
+cp blackbox/sessions/<mission_id>.zip          /path/to/share/
+cp blackbox/sessions/<mission_id>/seal.json    /path/to/share/<mission_id>.seal.json
+```
+
+Exits with code `0` on VERIFIED, `1` on any mismatch.
+
 ---
 
 ## How it works
