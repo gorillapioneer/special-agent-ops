@@ -14,7 +14,7 @@ Flow:
    10.  Write mission_summary.md (includes seal hashes + card paths).
    11.  Return a result dict so the CLI can print the summary.
 
-No external dependencies — stdlib only.
+QR image generation uses the qrcode[pil] runtime dependency.
 """
 
 import json
@@ -23,7 +23,7 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import compressor, git_tools, html_card as html_mod, qr_payload as qr_mod, seal as seal_mod, seal_card as card_mod, summary
+from . import compressor, git_tools, html_card as html_mod, qr_image as qr_image_mod, qr_payload as qr_mod, seal as seal_mod, seal_card as card_mod, summary
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -168,12 +168,20 @@ def record_mission(name: str, command: str, repo_path: Path = None) -> dict:
     # ── QR payload (compact JSON for QR encoding) ─────────────────────────────
     qr_paths = qr_mod.write_qr_payload(session_dir=session_dir, seal_payload=payload)
 
+    # QR image is derived from the compact payload and remains outside the seal.
+    qr_image_path = qr_image_mod.write_qr_image(
+        session_dir=session_dir,
+        qr_payload_txt_path=qr_paths["qr_payload_txt_path"],
+    )
+    qr_paths["qr_image_path"] = qr_image_path
+
     # ── HTML card (standalone, no external assets) ────────────────────────────
     qr_text = (session_dir / "seal_qr_payload.txt").read_text(encoding="utf-8")
     html_card_path = html_mod.write_html_card(
         session_dir=session_dir,
         payload=payload,
         qr_payload_text=qr_text,
+        qr_image_path=qr_image_path,
     )
 
     # ── Summary (written last — references seal hashes and card paths) ────────
@@ -207,5 +215,6 @@ def record_mission(name: str, command: str, repo_path: Path = None) -> dict:
         "seal_payload_path":    card_paths["seal_payload_path"],
         "qr_payload_json_path": qr_paths["qr_payload_json_path"],
         "qr_payload_txt_path":  qr_paths["qr_payload_txt_path"],
+        "qr_image_path":        qr_image_path,
         "html_card_path":       html_card_path,
     }

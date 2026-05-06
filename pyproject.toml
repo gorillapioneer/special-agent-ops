@@ -9,8 +9,9 @@ description = "Black box recorder for AI coding agent sessions."
 readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}
-
-# No external runtime dependencies — stdlib only.
+dependencies = [
+    "qrcode[pil]",
+]
 
 [project.scripts]
 # After `pip install -e .` you can use `sao run ...` directly.

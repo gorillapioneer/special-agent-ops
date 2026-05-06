@@ -21,11 +21,12 @@ AI agents can change a lot of code quickly. Special Agent Ops records what happe
 - **Shareable Markdown mission card** — compact `seal_card.md` for issues and PR comments
 - **Standalone HTML mission card** — dark-themed `seal_card.html`, no external assets
 - **Compact QR-ready seal payload** — minimal JSON sized to fit a standard QR code
+- **QR image mission seal** — generated `seal_qr.png` for scanning the compact proof payload
 - **Mission browser CLI** — `sao list`, `sao show`, `sao verify`
 - **Archive verification** — `sao verify-archive` confirms integrity from a `.zip` alone
 - **Local mission dashboard** — `sao dashboard` serves a mission index on `127.0.0.1`
 
-No external dependencies. Standard library only. Windows and Unix compatible.
+Runtime dependency: `qrcode[pil]` for QR image generation. Windows and Unix compatible.
 
 ---
 
@@ -70,6 +71,7 @@ sao dashboard --port 8765
   Seal Card:       blackbox/sessions/20260506_091500_pytest_baseline/seal_card.md
   HTML Card:       blackbox/sessions/20260506_091500_pytest_baseline/seal_card.html
   QR Payload:      blackbox/sessions/20260506_091500_pytest_baseline/seal_qr_payload.json
+  QR Image:        blackbox/sessions/20260506_091500_pytest_baseline/seal_qr.png
 ================================================================
 ```
 
@@ -94,6 +96,7 @@ Each mission session creates a folder under `blackbox/sessions/<mission_id>/`:
 | `seal_card.html` | Standalone HTML mission card (browser/screenshot-ready) |
 | `seal_qr_payload.json` | Compact QR-ready payload (no whitespace JSON) |
 | `seal_qr_payload.txt` | Same compact QR payload as plain text |
+| `seal_qr.png` | Scannable QR image generated from the compact payload |
 | `mission_summary.md` | Human-readable summary of the session |
 
 The whole session folder is also compressed to `<mission_id>.zip`. Sessions are stored under `blackbox/sessions/` (excluded from git by `.gitignore`).
@@ -188,7 +191,11 @@ Fields:
 | `sha256` | Archive SHA256 (full 64-char hex) |
 | `seal` | Seal version from `seal.json` |
 
-No QR image is generated — the payload file is the input. Point any QR encoder at `seal_qr_payload.txt` to produce a scannable code.
+---
+
+## QR Image Seal
+
+Each mission creates `seal_qr.png` from the compact QR payload. The QR code contains only mission identity and proof data, not the full black box archive.
 
 ---
 
@@ -202,9 +209,10 @@ Each mission creates a standalone HTML card that can be opened in a browser or a
 - PASS / FAIL badge
 - Command, changed files count, timing
 - Full archive SHA256
+- Local QR image (`seal_qr.png`) when present
 - QR payload text in a compact code block
 
-No JavaScript, no external CSS, no remote images — the file is completely self-contained and safe to attach or embed anywhere.
+No JavaScript, no external CSS, no remote images. The HTML file is standalone except for the local `seal_qr.png` image beside it.
 
 Source: [`sao/blackbox/html_card.py`](sao/blackbox/html_card.py)
 
@@ -237,7 +245,7 @@ Exits with code `1` if the mission is not found or `seal_card.html` does not exi
 
 ## Mini Dashboard
 
-Use `sao dashboard` to open a local dashboard listing recorded missions and links to their mission cards, summaries, and QR payloads.
+Use `sao dashboard` to open a local dashboard listing recorded missions and links to their mission cards, summaries, QR payloads, and QR images.
 
 ```bash
 python -m sao.cli dashboard
@@ -265,8 +273,9 @@ Dashboard routes:
 | `/missions/<id>/card` | `seal_card.html` (HTML mission card) |
 | `/missions/<id>/summary` | `mission_summary.md` (plain text) |
 | `/missions/<id>/qr-payload` | `seal_qr_payload.txt` (compact QR JSON) |
+| `/missions/<id>/qr-image` | `seal_qr.png` (QR image) |
 
-The server binds to `127.0.0.1` only (loopback — not exposed to the network). Only the three known files above can be served from validated session folders. No arbitrary file access is possible.
+The server binds to `127.0.0.1` only (loopback — not exposed to the network). Only the known files above can be served from validated session folders. No arbitrary file access is possible.
 
 Source: [`sao/blackbox/dashboard.py`](sao/blackbox/dashboard.py)
 
@@ -300,7 +309,7 @@ Mission ID                          Status  Changed  Command
 
 ### sao show \<mission_id\>
 
-Prints full metadata for one session: name, status, timing, command, exit code, changed files, archive SHA256, and paths to the seal card, mission summary, and QR payload.
+Prints full metadata for one session: name, status, timing, command, exit code, changed files, archive SHA256, and paths to the seal card, mission summary, QR payload, and QR image.
 
 ### sao verify \<mission_id\>
 
@@ -372,7 +381,7 @@ Exits with code `0` on VERIFIED, `1` on any mismatch.
 - **Commands are user-supplied and executed locally.** `sao run` passes `--command` directly to the OS shell. Never record commands from untrusted sources.
 - **Do not run untrusted commands.** If an agent generates the command, review it before recording.
 - **`blackbox/sessions` is gitignored.** Session folders may contain stdout, diffs, and file paths that include sensitive information. They are excluded from git by default.
-- **The dashboard only serves allowlisted files.** `sao dashboard` serves only `seal_card.html`, `mission_summary.md`, and `seal_qr_payload.txt` from validated session folders. No arbitrary paths can be accessed.
+- **The dashboard only serves allowlisted files.** `sao dashboard` serves only `seal_card.html`, `mission_summary.md`, `seal_qr_payload.txt`, and `seal_qr.png` from validated session folders. No arbitrary paths can be accessed.
 - **Hashes prove whether files changed after recording, not whether the command was safe.** A VERIFIED result means the recorded data is intact — it says nothing about whether the agent's behaviour was correct or safe.
 
 See [`docs/SECURITY_MODEL.md`](docs/SECURITY_MODEL.md) for a full explanation.
@@ -629,7 +638,7 @@ See [`docs/branch-protection.md`](docs/branch-protection.md) for making these ch
 
 See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the full roadmap. Highlights:
 
-- [ ] v1.1 — QR image generation
+- [x] v1.1 — QR image generation
 - [ ] v1.2 — MapRoom repo graph
 - [ ] v1.3 — Agent wrappers for Claude Code / Codex / Devin
 - [ ] v1.4 — Pull request mission reports and CI artifact upload

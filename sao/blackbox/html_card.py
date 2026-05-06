@@ -1,9 +1,8 @@
 """
 html_card.py — standalone HTML mission card for a recorded session.
 
-Generates a single self-contained HTML file with no external assets,
-JavaScript, or remote resources. Safe for attaching to GitHub issues/PRs
-or opening directly in a browser.
+Generates a single HTML file with no JavaScript or remote resources. The
+HTML may reference the local seal_qr.png image beside it.
 """
 
 from __future__ import annotations
@@ -26,7 +25,11 @@ def _e(value) -> str:
     return html.escape(str(value))
 
 
-def render_html_card(payload: dict, qr_payload_text: str | None = None) -> str:
+def render_html_card(
+    payload: dict,
+    qr_payload_text: str | None = None,
+    qr_image_src: str | None = None,
+) -> str:
     """Return a complete standalone HTML document for one mission session.
 
     Parameters
@@ -44,6 +47,16 @@ def render_html_card(payload: dict, qr_payload_text: str | None = None) -> str:
     changed      = _e(payload.get("changed_files_count", 0))
     sha256       = _e(payload.get("archive_sha256", ""))
     seal_ver     = _e(payload.get("seal_version", ""))
+
+    qr_image_block = ""
+    if qr_image_src:
+        qr_image_block = f"""
+      <tr>
+        <td class="label">QR Image</td>
+        <td>
+          <img class="qr-image" src="{_e(qr_image_src)}" alt="QR code for mission seal payload">
+        </td>
+      </tr>"""
 
     qr_block = ""
     if qr_payload_text:
@@ -147,6 +160,15 @@ def render_html_card(payload: dict, qr_payload_text: str | None = None) -> str:
     font-size: 0.72rem;
     line-height: 1.5;
   }}
+  .qr-image {{
+    display: block;
+    width: 192px;
+    height: 192px;
+    image-rendering: pixelated;
+    background: #ffffff;
+    border: 1px solid {_BORDER};
+    border-radius: 4px;
+  }}
   .footer {{
     border-top: 1px solid {_BORDER};
     padding: 0.6rem 1.5rem;
@@ -194,7 +216,7 @@ def render_html_card(payload: dict, qr_payload_text: str | None = None) -> str:
     <tr>
       <td class="label">Seal Version</td>
       <td>{seal_ver}</td>
-    </tr>{qr_block}
+    </tr>{qr_image_block}{qr_block}
   </table>
   <div class="footer">Recorded by Special Agent Ops &bull; seal v{seal_ver}</div>
 </div>
@@ -207,6 +229,7 @@ def write_html_card(
     session_dir: Path,
     payload: dict,
     qr_payload_text: str | None = None,
+    qr_image_path: Path | None = None,
 ) -> Path:
     """Render and write seal_card.html into *session_dir*.
 
@@ -215,9 +238,19 @@ def write_html_card(
     session_dir:     The mission session folder.
     payload:         Seal payload dict (from seal_card.build_seal_payload).
     qr_payload_text: Compact QR JSON string (from qr_payload.render_qr_payload_text).
+    qr_image_path:   Optional generated seal_qr.png path.
 
     Returns the Path of the written file.
     """
+    qr_image_src = None
+    if qr_image_path and Path(qr_image_path).exists():
+        qr_image_src = "seal_qr.png"
+    elif (session_dir / "seal_qr.png").exists():
+        qr_image_src = "seal_qr.png"
+
     html_path = session_dir / "seal_card.html"
-    html_path.write_text(render_html_card(payload, qr_payload_text), encoding="utf-8")
+    html_path.write_text(
+        render_html_card(payload, qr_payload_text, qr_image_src),
+        encoding="utf-8",
+    )
     return html_path
