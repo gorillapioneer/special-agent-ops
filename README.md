@@ -6,9 +6,24 @@
 
 [![Safety checks](https://github.com/gorillapioneer/special-agent-ops/actions/workflows/safety-checks.yml/badge.svg)](https://github.com/gorillapioneer/special-agent-ops/actions/workflows/safety-checks.yml)
 
+![AI Agent Ready](https://img.shields.io/badge/AI%20Agent-Ready-black)
+![Claude Code](https://img.shields.io/badge/Claude%20Code-Compatible-6f42c1)
+![Codex](https://img.shields.io/badge/Codex-Assisted-1f6feb)
+![Devin](https://img.shields.io/badge/Devin-Ready-0f172a)
+![Black Box Recorder](https://img.shields.io/badge/Black%20Box-Recorder-111827)
+![QR Sealed](https://img.shields.io/badge/QR-Sealed-22c55e)
+
 **A black box recorder and local control room for AI coding agents.**
 
 AI agents can change a lot of code quickly. Special Agent Ops records what happened, what changed, what passed, what failed, and whether the mission archive can be verified.
+
+---
+
+## Agent compatibility
+
+Special Agent Ops records missions from any coding agent or shell workflow. It is designed to work with Claude Code, Codex, Devin-style agents, GitHub Copilot, Cursor, and generic local commands.
+
+The badges above describe compatibility and workflow support. They do not imply official endorsement by those tools or vendors.
 
 ---
 
