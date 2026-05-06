@@ -99,6 +99,38 @@ The seal covers:
 
 To verify an archive manually: compare its SHA256 against `archive_sha256` in `seal.json` or `seal.txt`.
 
+### Mission Card
+
+Each mission also creates a compact seal payload and a Markdown mission card that can be shared in issues, pull requests, release notes, or dashboards.
+
+**`seal_payload.json`** — machine-readable compact snapshot:
+```json
+{
+  "mission_id": "20260506_091500_pytest_baseline",
+  "name": "pytest baseline",
+  "status": "PASS",
+  "exit_code": 0,
+  "changed_files_count": 2,
+  "archive_sha256": "a665a45920422f9d...",
+  "seal_version": "0.2"
+}
+```
+
+**`seal_card.md`** — shareable Markdown card:
+```
+# SPECIAL AGENT OPS MISSION CARD
+
+Mission: pytest baseline
+Mission ID: 20260506_091500_pytest_baseline
+Status: PASS
+Command: `python -m pytest`
+Changed Files: 2
+Archive SHA256: `a665a45920422f9d...`
+Seal Version: 0.2
+
+Recorded by Special Agent Ops.
+```
+
 ---
 
 ## How it works

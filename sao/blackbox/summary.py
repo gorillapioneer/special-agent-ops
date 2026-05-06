@@ -22,11 +22,13 @@ def generate_summary(
     stdout: str,
     stderr: str,
     seal: dict | None = None,
+    card_paths: dict | None = None,
 ) -> str:
     """Return a markdown string summarising one mission session."""
     m = manifest
     exit_code = m.get("exit_code", "?")
-    result_label = "[PASS]" if exit_code == 0 else f"[FAIL — exit {exit_code}]"
+    status = "PASS" if exit_code == 0 else "FAIL"
+    result_label = f"[{status}]" if exit_code == 0 else f"[{status} — exit {exit_code}]"
     changed = m.get("changed_files", [])
 
     sections = []
@@ -38,7 +40,7 @@ def generate_summary(
             f"| Field | Value |",
             f"|---|---|",
             f"| Mission ID | `{m['mission_id']}` |",
-            f"| Result | **{result_label}** |",
+            f"| Status | **{result_label}** |",
             f"| Command | `{m['command']}` |",
             f"| Branch | `{m.get('git_branch', 'unknown')}` |",
             f"| Started | {m['started_at']} |",
@@ -62,6 +64,17 @@ def generate_summary(
         sections.append(file_list)
     else:
         sections.append("  - *(no file changes detected)*")
+
+    # ── Seal card references ──────────────────────────────────────────────────
+    if card_paths:
+        sections.append("## Mission Card\n")
+        sections.append(
+            "\n".join([
+                f"- **Status:** {status}",
+                f"- **Seal Card:** `{card_paths.get('seal_card_path', 'n/a')}`",
+                f"- **Seal Payload:** `{card_paths.get('seal_payload_path', 'n/a')}`",
+            ])
+        )
 
     # ── Seal ─────────────────────────────────────────────────────────────────
     if seal:

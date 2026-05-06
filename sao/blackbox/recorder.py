@@ -2,16 +2,17 @@
 recorder.py — orchestrates one mission recording session end-to-end.
 
 Flow:
-    1. Generate a unique mission_id from timestamp + sanitised name.
-    2. Create the session folder under blackbox/sessions/.
-    3. Capture git state *before* running the command.
-    4. Run the command with subprocess (shell=True for cross-platform support).
-    5. Capture git state *after*.
-    6. Write raw artefacts (manifest.json, stdout.txt, git_diff.patch, …).
-    7. Compress the session folder into a .zip archive.
-    8. Write the SHA256 seal (seal.json + seal.txt).
-    9. Write mission_summary.md (includes seal hashes).
-   10. Return a result dict so the CLI can print the summary.
+    1.  Generate a unique mission_id from timestamp + sanitised name.
+    2.  Create the session folder under blackbox/sessions/.
+    3.  Capture git state *before* running the command.
+    4.  Run the command with subprocess (shell=True for cross-platform support).
+    5.  Capture git state *after*.
+    6.  Write raw artefacts (manifest.json, stdout.txt, git_diff.patch, …).
+    7.  Compress the session folder into a .zip archive.
+    8.  Write the SHA256 seal (seal.json + seal.txt).
+    9.  Write the seal card (seal_payload.json + seal_card.md).
+   10.  Write mission_summary.md (includes seal hashes + card paths).
+   11.  Return a result dict so the CLI can print the summary.
 
 No external dependencies — stdlib only.
 """
@@ -22,7 +23,7 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import compressor, git_tools, seal as seal_mod, summary
+from . import compressor, git_tools, seal as seal_mod, seal_card as card_mod, summary
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -75,8 +76,10 @@ def record_mission(name: str, command: str, repo_path: Path = None) -> dict:
 
     Returns
     -------
-    dict with keys: mission_id, command, exit_code, changed_files_count,
-    session_dir (Path), zip_path (Path), seal_path (Path), archive_sha256 (str).
+    dict with keys: mission_id, name, command, exit_code, status,
+    changed_files_count, session_dir (Path), zip_path (Path),
+    seal_path (Path), archive_sha256 (str),
+    seal_card_path (Path), seal_payload_path (Path).
     """
     if repo_path is None:
         repo_path = Path.cwd()
@@ -144,9 +147,8 @@ def record_mission(name: str, command: str, repo_path: Path = None) -> dict:
     zip_path = compressor.compress_session(session_dir)
 
     # ── Seal ──────────────────────────────────────────────────────────────────
-    # The seal hashes the raw data files and the archive.
-    # mission_summary.md is excluded from the directory hash (it is written
-    # next and contains the seal hashes — avoiding a circular dependency).
+    # Hashes raw data files and the archive.  Card and summary files are
+    # written after this point and are excluded from the directory hash.
     seal_data = seal_mod.write_seal(
         session_dir=session_dir,
         archive_path=zip_path,
@@ -154,19 +156,40 @@ def record_mission(name: str, command: str, repo_path: Path = None) -> dict:
     )
     seal_path = session_dir / "seal.json"
 
-    # ── Summary (written last so it can reference the seal) ───────────────────
+    # ── Seal card (compact payload + shareable Markdown card) ─────────────────
+    payload = card_mod.build_seal_payload(
+        manifest=manifest,
+        seal=seal_data,
+        exit_code=exit_code,
+        changed_files=changed_files,
+    )
+    card_paths = card_mod.write_seal_card(session_dir=session_dir, payload=payload)
+
+    # ── Summary (written last — references seal hashes and card paths) ────────
     _write(
         "mission_summary.md",
-        summary.generate_summary(manifest, stdout_text, stderr_text, seal=seal_data),
+        summary.generate_summary(
+            manifest,
+            stdout_text,
+            stderr_text,
+            seal=seal_data,
+            card_paths=card_paths,
+        ),
     )
 
+    status = "PASS" if exit_code == 0 else "FAIL"
+
     return {
-        "mission_id": mission_id,
-        "command": command,
-        "exit_code": exit_code,
+        "mission_id":          mission_id,
+        "name":                name,
+        "command":             command,
+        "exit_code":           exit_code,
+        "status":              status,
         "changed_files_count": len(changed_files),
-        "session_dir": session_dir,
-        "zip_path": zip_path,
-        "seal_path": seal_path,
-        "archive_sha256": seal_data["archive_sha256"],
+        "session_dir":         session_dir,
+        "zip_path":            zip_path,
+        "seal_path":           seal_path,
+        "archive_sha256":      seal_data["archive_sha256"],
+        "seal_card_path":      card_paths["seal_card_path"],
+        "seal_payload_path":   card_paths["seal_payload_path"],
     }
