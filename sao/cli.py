@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 from sao.blackbox.recorder import record_mission
-from sao.blackbox import browser
+from sao.blackbox import browser, dashboard as dashboard_mod
 
 
 # ── run ───────────────────────────────────────────────────────────────────────
@@ -197,6 +197,18 @@ def cmd_verify(args) -> int:
     return 0 if result["verified"] else 1
 
 
+# ── dashboard ────────────────────────────────────────────────────────────────
+
+def cmd_dashboard(args) -> int:
+    sessions_root = browser.get_sessions_root(Path.cwd())
+    dashboard_mod.run_dashboard(
+        sessions_root=sessions_root,
+        host="127.0.0.1",
+        port=args.port,
+    )
+    return 0
+
+
 # ── open ─────────────────────────────────────────────────────────────────────
 
 def cmd_open(args) -> int:
@@ -277,6 +289,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  list            List all recorded missions.\n"
             "  show            Inspect a mission session.\n"
             "  open            Open a mission HTML card in the default browser.\n"
+            "  dashboard       Start a local dashboard server.\n"
             "  verify          Verify SHA256 seals for a mission session.\n"
             "  verify-archive  Verify a mission .zip archive directly.\n"
         ),
@@ -319,6 +332,25 @@ def build_parser() -> argparse.ArgumentParser:
     )
     show_p.add_argument("mission_id", help="Mission ID, e.g. 20260506_091500_pytest_baseline")
     show_p.set_defaults(func=cmd_show)
+
+    # ── dashboard ─────────────────────────────────────────────────────────────
+    dash_p = sub.add_parser(
+        "dashboard",
+        help="Start a local mission dashboard server.",
+        description=(
+            "Serve a local dashboard at http://127.0.0.1:<port> listing all\n"
+            "recorded missions with links to their HTML cards, summaries,\n"
+            "and QR payloads.  Only serves known files from known session\n"
+            "folders — no arbitrary file access."
+        ),
+    )
+    dash_p.add_argument(
+        "--port",
+        type=int,
+        default=8765,
+        help="TCP port to listen on (default: 8765).",
+    )
+    dash_p.set_defaults(func=cmd_dashboard)
 
     # ── open ──────────────────────────────────────────────────────────────────
     open_p = sub.add_parser(
