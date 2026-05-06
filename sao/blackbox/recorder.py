@@ -23,7 +23,7 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import compressor, git_tools, qr_payload as qr_mod, seal as seal_mod, seal_card as card_mod, summary
+from . import compressor, git_tools, html_card as html_mod, qr_payload as qr_mod, seal as seal_mod, seal_card as card_mod, summary
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -168,6 +168,14 @@ def record_mission(name: str, command: str, repo_path: Path = None) -> dict:
     # ── QR payload (compact JSON for QR encoding) ─────────────────────────────
     qr_paths = qr_mod.write_qr_payload(session_dir=session_dir, seal_payload=payload)
 
+    # ── HTML card (standalone, no external assets) ────────────────────────────
+    qr_text = (session_dir / "seal_qr_payload.txt").read_text(encoding="utf-8")
+    html_card_path = html_mod.write_html_card(
+        session_dir=session_dir,
+        payload=payload,
+        qr_payload_text=qr_text,
+    )
+
     # ── Summary (written last — references seal hashes and card paths) ────────
     _write(
         "mission_summary.md",
@@ -178,6 +186,7 @@ def record_mission(name: str, command: str, repo_path: Path = None) -> dict:
             seal=seal_data,
             card_paths=card_paths,
             qr_paths=qr_paths,
+            html_card_path=html_card_path,
         ),
     )
 
@@ -198,4 +207,5 @@ def record_mission(name: str, command: str, repo_path: Path = None) -> dict:
         "seal_payload_path":    card_paths["seal_payload_path"],
         "qr_payload_json_path": qr_paths["qr_payload_json_path"],
         "qr_payload_txt_path":  qr_paths["qr_payload_txt_path"],
+        "html_card_path":       html_card_path,
     }

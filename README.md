@@ -50,6 +50,7 @@ Each session folder contains:
 | `seal.txt` | SHA256 tamper-evident seal (human-readable) |
 | `seal_payload.json` | Compact mission card payload |
 | `seal_card.md` | Shareable Markdown mission card |
+| `seal_card.html` | Standalone HTML mission card (browser/screenshot-ready) |
 | `seal_qr_payload.json` | Compact QR-ready payload (no whitespace JSON) |
 | `seal_qr_payload.txt` | Same compact QR payload as plain text |
 | `mission_summary.md` | Human-readable summary of the session |
@@ -157,6 +158,24 @@ Fields:
 | `seal` | Seal version from `seal.json` |
 
 No QR image is generated — the payload file is the input. Point any QR encoder at `seal_qr_payload.txt` to produce a scannable code.
+
+---
+
+## HTML Mission Card
+
+Each mission creates a standalone HTML card that can be opened in a browser or attached to issues/PRs as visual proof of a recorded agent mission.
+
+**`seal_card.html`** — dark-themed, screenshot-ready, zero external assets:
+
+- Mission name and ID
+- PASS / FAIL badge
+- Command, changed files count, timing
+- Full archive SHA256
+- QR payload text in a compact code block
+
+No JavaScript, no external CSS, no remote images — the file is completely self-contained and safe to attach or embed anywhere.
+
+Source: [`sao/blackbox/html_card.py`](sao/blackbox/html_card.py)
 
 ---
 

@@ -24,6 +24,7 @@ def generate_summary(
     seal: dict | None = None,
     card_paths: dict | None = None,
     qr_paths: dict | None = None,
+    html_card_path=None,
 ) -> str:
     """Return a markdown string summarising one mission session."""
     m = manifest
@@ -78,6 +79,8 @@ def generate_summary(
             lines.append(
                 f"- **QR Payload:** `{qr_paths.get('qr_payload_json_path', 'n/a')}`"
             )
+        if html_card_path:
+            lines.append(f"- **HTML Card:** `{html_card_path}`")
         sections.append("\n".join(lines))
 
     # ── Seal ─────────────────────────────────────────────────────────────────
