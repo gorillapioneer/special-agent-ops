@@ -6,37 +6,78 @@
 
 [![Safety checks](https://github.com/gorillapioneer/special-agent-ops/actions/workflows/safety-checks.yml/badge.svg)](https://github.com/gorillapioneer/special-agent-ops/actions/workflows/safety-checks.yml)
 
-> **Mission control for AI coding agents: give every agent a mission, a boundary, a review gate, and an off switch.**
+**A black box recorder and local control room for AI coding agents.**
 
-A practical control kit for coordinating AI coding agents without handing them the keys to the whole codebase.
+AI agents can change a lot of code quickly. Special Agent Ops records what happened, what changed, what passed, what failed, and whether the mission archive can be verified.
 
 ---
 
-## Black Box Recorder — CLI
+## Features
 
-Record everything an AI coding agent does in a session: git state, command output, changed files, and a compressed archive you can replay or audit later.
+- **Mission recorder** — runs any command and captures the full session
+- **Git diff capture** — records `git status` and a unified diff before and after
+- **stdout / stderr capture** — full output saved to text files
+- **Tamper-evident SHA256 seal** — manifest, archive, and directory hashes written to `seal.json`
+- **Shareable Markdown mission card** — compact `seal_card.md` for issues and PR comments
+- **Standalone HTML mission card** — dark-themed `seal_card.html`, no external assets
+- **Compact QR-ready seal payload** — minimal JSON sized to fit a standard QR code
+- **Mission browser CLI** — `sao list`, `sao show`, `sao verify`
+- **Archive verification** — `sao verify-archive` confirms integrity from a `.zip` alone
+- **Local mission dashboard** — `sao dashboard` serves a mission index on `127.0.0.1`
+
+No external dependencies. Standard library only. Windows and Unix compatible.
+
+---
+
+## Quickstart
 
 ```bash
-# Run any command and record it as a mission
-python -m sao.cli run --name "pytest baseline" --command "python -m pytest"
+# No install needed — run directly
+python -m sao.cli run --name "first mission" --command "python --version"
+
+# Or install as a CLI tool
+pip install -e .
+sao run --name "first mission" --command "python --version"
 ```
 
-Output:
+Then browse your missions:
+
+```bash
+sao list
+sao show <mission_id>
+sao verify <mission_id>
+sao open <mission_id>
+sao dashboard --port 8765
+```
+
+---
+
+## Example output
 
 ```
-========================================================
+================================================================
   SPECIAL AGENT OPS — MISSION COMPLETE
-========================================================
-  Mission ID:     20260506_091500_pytest_baseline
-  Command:        python -m pytest
-  Exit Code:      0
-  Changed Files:  2
-  Session Folder: blackbox/sessions/20260506_091500_pytest_baseline
-  Archive:        blackbox/sessions/20260506_091500_pytest_baseline.zip
-========================================================
+================================================================
+  Mission ID:      20260506_091500_pytest_baseline
+  Status:          PASS
+  Command:         python -m pytest tests/ -x -q
+  Exit Code:       0
+  Changed Files:   3
+  Session Folder:  blackbox/sessions/20260506_091500_pytest_baseline
+  Archive:         blackbox/sessions/20260506_091500_pytest_baseline.zip
+  Archive SHA256:  a665a45920422f9d...4b56e7a8
+  Seal:            blackbox/sessions/20260506_091500_pytest_baseline/seal.json
+  Seal Card:       blackbox/sessions/20260506_091500_pytest_baseline/seal_card.md
+  HTML Card:       blackbox/sessions/20260506_091500_pytest_baseline/seal_card.html
+  QR Payload:      blackbox/sessions/20260506_091500_pytest_baseline/seal_qr_payload.json
+================================================================
 ```
 
-Each session folder contains:
+---
+
+## Generated files
+
+Each mission session creates a folder under `blackbox/sessions/<mission_id>/`:
 
 | File | Contents |
 |---|---|
@@ -55,37 +96,27 @@ Each session folder contains:
 | `seal_qr_payload.txt` | Same compact QR payload as plain text |
 | `mission_summary.md` | Human-readable summary of the session |
 
-The whole folder is also compressed to `<mission_id>.zip` for easy archiving.
+The whole session folder is also compressed to `<mission_id>.zip`. Sessions are stored under `blackbox/sessions/` (excluded from git by `.gitignore`).
 
-### Installation
+---
 
-```bash
-# No external dependencies — stdlib only.
-# Option 1: run directly (no install needed)
-python -m sao.cli run --name "my mission" --command "your-command"
+## CLI reference
 
-# Option 2: install as a CLI tool
-pip install -e .
-sao run --name "my mission" --command "your-command"
-```
+| Command | What it does |
+|---|---|
+| `sao run --name "..." --command "..."` | Record a mission session |
+| `sao list` | List all recorded missions |
+| `sao show <mission_id>` | Show full metadata for one mission |
+| `sao verify <mission_id>` | Verify SHA256 seals against the session folder |
+| `sao verify-archive <path>.zip` | Verify SHA256 seals from a `.zip` archive |
+| `sao open <mission_id>` | Open the HTML mission card in the default browser |
+| `sao dashboard [--port N]` | Start a local dashboard (default port 8765) |
 
-### More examples
-
-```bash
-# Record a test run
-python -m sao.cli run --name "unit tests" --command "python -m pytest tests/"
-
-# Record a linting pass
-python -m sao.cli run --name "lint check" --command "python -m ruff check ."
-
-# Record any shell command — Windows PowerShell example
-python -m sao.cli run --name "build check" --command "npm run build"
-```
-
-Sessions are stored under `blackbox/sessions/` (excluded from git by `.gitignore`).
 Source: [`sao/`](sao/)
 
-### Mission Seal
+---
+
+## Mission Seal
 
 Each mission generates a SHA256 seal so you can verify the archive has not been changed after recording.
 
@@ -117,7 +148,7 @@ Each mission also creates a compact seal payload and a Markdown mission card tha
   "name": "pytest baseline",
   "status": "PASS",
   "exit_code": 0,
-  "changed_files_count": 2,
+  "changed_files_count": 3,
   "archive_sha256": "a665a45920422f9d...",
   "seal_version": "0.2"
 }
@@ -130,8 +161,8 @@ Each mission also creates a compact seal payload and a Markdown mission card tha
 Mission: pytest baseline
 Mission ID: 20260506_091500_pytest_baseline
 Status: PASS
-Command: `python -m pytest`
-Changed Files: 2
+Command: `python -m pytest tests/ -x -q`
+Changed Files: 3
 Archive SHA256: `a665a45920422f9d...`
 Seal Version: 0.2
 
@@ -179,6 +210,31 @@ Source: [`sao/blackbox/html_card.py`](sao/blackbox/html_card.py)
 
 ---
 
+## Open Mission Card
+
+Use `sao open <mission_id>` to open a recorded mission's standalone HTML card in your default browser.
+
+```bash
+python -m sao.cli open 20260506_091500_pytest_baseline
+```
+
+Output:
+
+```
+================================================================
+  SPECIAL AGENT OPS — OPEN
+================================================================
+  Mission ID:  20260506_091500_pytest_baseline
+  HTML Card:   .../seal_card.html
+================================================================
+  Result: OPENED
+================================================================
+```
+
+Exits with code `1` if the mission is not found or `seal_card.html` does not exist (e.g. session recorded before v0.7).
+
+---
+
 ## Mini Dashboard
 
 Use `sao dashboard` to open a local dashboard listing recorded missions and links to their mission cards, summaries, and QR payloads.
@@ -216,31 +272,6 @@ Source: [`sao/blackbox/dashboard.py`](sao/blackbox/dashboard.py)
 
 ---
 
-## Open Mission Card
-
-Use `sao open <mission_id>` to open a recorded mission's standalone HTML card in your default browser.
-
-```bash
-python -m sao.cli open 20260506_091500_pytest_baseline
-```
-
-Output:
-
-```
-================================================================
-  SPECIAL AGENT OPS — OPEN
-================================================================
-  Mission ID:  20260506_091500_pytest_baseline
-  HTML Card:   .../seal_card.html
-================================================================
-  Result: OPENED
-================================================================
-```
-
-Exits with code `1` if the mission is not found or `seal_card.html` does not exist (e.g. session recorded before v0.7).
-
----
-
 ## Mission Browser CLI
 
 Inspect and verify recorded sessions without opening any files manually.
@@ -263,7 +294,7 @@ Prints a compact table of every session in `blackbox/sessions/`, newest first:
 ```
 Mission ID                          Status  Changed  Command
 -------------------------------------------------------------------
-20260506_091500_pytest_baseline     PASS          0  python --version
+20260506_091500_pytest_baseline     PASS          3  python -m pytest tests/ -x -q
 20260506_090000_fail_demo           FAIL          5  python -c "raise SystemExit(42)"
 ```
 
@@ -333,6 +364,18 @@ cp blackbox/sessions/<mission_id>/seal.json    /path/to/share/<mission_id>.seal.
 ```
 
 Exits with code `0` on VERIFIED, `1` on any mismatch.
+
+---
+
+## Security notes
+
+- **Commands are user-supplied and executed locally.** `sao run` passes `--command` directly to the OS shell. Never record commands from untrusted sources.
+- **Do not run untrusted commands.** If an agent generates the command, review it before recording.
+- **`blackbox/sessions` is gitignored.** Session folders may contain stdout, diffs, and file paths that include sensitive information. They are excluded from git by default.
+- **The dashboard only serves allowlisted files.** `sao dashboard` serves only `seal_card.html`, `mission_summary.md`, and `seal_qr_payload.txt` from validated session folders. No arbitrary paths can be accessed.
+- **Hashes prove whether files changed after recording, not whether the command was safe.** A VERIFIED result means the recorded data is intact — it says nothing about whether the agent's behaviour was correct or safe.
+
+See [`docs/SECURITY_MODEL.md`](docs/SECURITY_MODEL.md) for a full explanation.
 
 ---
 
@@ -578,30 +621,31 @@ See [`docs/branch-protection.md`](docs/branch-protection.md) for making these ch
 | [`examples/safe-bugfix-task/`](examples/safe-bugfix-task/README.md) | 🟡 AMBER | Fix a scoped non-auth bug on a branch |
 | [`examples/pr-review-task/`](examples/pr-review-task/README.md) | 🟢 GREEN | Use an agent to review a PR diff before human merge |
 | [`examples/pr-safety-demo/`](examples/pr-safety-demo/README.md) | 🟡 AMBER | Walk through mission, safety checks, review, approval, and rollback |
-
----
-
-## Release Readiness
-
-For v0.1.0 launch prep, use:
-
-- [`RELEASE_NOTES.md`](RELEASE_NOTES.md) for included scope, verification steps, limitations, and roadmap.
-- [`docs/launch-checklist.md`](docs/launch-checklist.md) for repo metadata, pre-launch checks, release steps, and post-launch checks.
-
-Do not publish a release, announcement, or launch post until the safety gate and no-secrets checks pass cleanly.
+| [`examples/mission_card_example.md`](examples/mission_card_example.md) | — | Example mission card with verification instructions |
 
 ---
 
 ## Roadmap
 
-These are directions the project could grow. Contributions welcome.
+See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the full roadmap. Highlights:
 
-- [ ] Agent coordination diagram (visual)
-- [ ] Checklist for onboarding a new AI tool to an existing team workflow
-- [ ] Guidance for multi-agent handoff (agent A passes output to agent B)
-- [ ] Integration examples: Linear, Jira, Notion as task sources
-- [ ] Example configs for Claude Code project files (`.claude/`)
-- [ ] Checklist for regulated industries (finance, health, legal)
+- [ ] v1.1 — QR image generation
+- [ ] v1.2 — MapRoom repo graph
+- [ ] v1.3 — Agent wrappers for Claude Code / Codex / Devin
+- [ ] v1.4 — Pull request mission reports and CI artifact upload
+- [ ] Later — Compressed binary event stream (MessagePack / CBOR / Zstd)
+
+---
+
+## Release Readiness
+
+For v1.0 launch prep, use:
+
+- [`CHANGELOG.md`](CHANGELOG.md) for the full version history.
+- [`RELEASE_NOTES.md`](RELEASE_NOTES.md) for included scope, verification steps, limitations, and roadmap.
+- [`docs/launch-checklist.md`](docs/launch-checklist.md) for repo metadata, pre-launch checks, release steps, and post-launch checks.
+
+Do not publish a release, announcement, or launch post until the safety gate and no-secrets checks pass cleanly.
 
 ---
 
@@ -611,7 +655,7 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Security
 
-See [`SECURITY.md`](SECURITY.md).
+See [`SECURITY.md`](SECURITY.md) and [`docs/SECURITY_MODEL.md`](docs/SECURITY_MODEL.md).
 
 ## License
 
