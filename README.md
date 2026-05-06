@@ -49,6 +49,7 @@ Copy the `<mission_id>` from the first command's output. Full demo script: [`doc
 ## Features
 
 - **Mission recorder** — runs any command and captures the full session
+- **Agent wrapper CLI** — `sao wrap` records argv commands without shell strings
 - **Git diff capture** — records `git status` and a unified diff before and after
 - **stdout / stderr capture** — full output saved to text files
 - **Tamper-evident SHA256 seal** — manifest, archive, and directory hashes written to `seal.json`
@@ -84,6 +85,22 @@ sao verify <mission_id>
 sao open <mission_id>
 sao dashboard --port 8765
 ```
+
+---
+
+## Wrap an agent
+
+Use `sao wrap` to record any AI coding agent or local command without manually building a shell string.
+
+Examples:
+
+```bash
+sao wrap --name "codex mission" -- codex
+sao wrap --name "claude code mission" -- claude
+sao wrap --name "test runner" -- python -m pytest
+```
+
+`sao wrap` passes the command as an argument list with `shell=False`. Use `sao run` when you intentionally need shell syntax such as pipes, redirects, or compound commands.
 
 ---
 
@@ -142,6 +159,7 @@ The whole session folder is also compressed to `<mission_id>.zip`. Sessions are 
 | Command | What it does |
 |---|---|
 | `sao run --name "..." --command "..."` | Record a mission session |
+| `sao wrap --name "..." -- <command> [args...]` | Record a command without building a shell string |
 | `sao list` | List all recorded missions |
 | `sao show <mission_id>` | Show full metadata for one mission |
 | `sao verify <mission_id>` | Verify SHA256 seals against the session folder |
@@ -412,7 +430,7 @@ Exits with code `0` on VERIFIED, `1` on any mismatch.
 
 ## Security notes
 
-- **Commands are user-supplied and executed locally.** `sao run` passes `--command` directly to the OS shell. Never record commands from untrusted sources.
+- **Commands are user-supplied and executed locally.** `sao run` passes `--command` directly to the OS shell; `sao wrap` runs an argument list with `shell=False`. Never record commands from untrusted sources.
 - **Do not run untrusted commands.** If an agent generates the command, review it before recording.
 - **`blackbox/sessions` is gitignored.** Session folders may contain stdout, diffs, and file paths that include sensitive information. They are excluded from git by default.
 - **The dashboard only serves allowlisted files.** `sao dashboard` serves only `seal_card.html`, `mission_summary.md`, `seal_qr_payload.txt`, and `seal_qr.png` from validated session folders. No arbitrary paths can be accessed.
