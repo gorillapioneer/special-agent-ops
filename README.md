@@ -12,6 +12,25 @@ AI agents can change a lot of code quickly. Special Agent Ops records what happe
 
 ---
 
+## 60-second demo
+
+In one minute: record a black box archive, verify its SHA256 seal, open the HTML/QR proof card, and browse the local dashboard.
+
+Run one mission, inspect it, verify it, open the proof card, then launch the local dashboard:
+
+```bash
+python -m sao.cli run --name "demo mission" --command "python --version"
+python -m sao.cli list
+python -m sao.cli show <mission_id>
+python -m sao.cli verify <mission_id>
+python -m sao.cli open <mission_id>
+python -m sao.cli dashboard --port 8765
+```
+
+Copy the `<mission_id>` from the first command's output. Full demo script: [`docs/demo/README_DEMO_SCRIPT.md`](docs/demo/README_DEMO_SCRIPT.md).
+
+---
+
 ## Features
 
 - **Mission recorder** — runs any command and captures the full session
