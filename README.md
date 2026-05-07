@@ -64,6 +64,7 @@ Copy the `<mission_id>` from the first command's output. Full demo script: [`doc
 - **Mission browser CLI** — `sao list`, `sao show`, `sao verify`
 - **Archive verification** — `sao verify-archive` confirms integrity from a `.zip` alone
 - **Local mission dashboard** — `sao dashboard` serves a mission index on `127.0.0.1`
+- **MapRoom timeline** — `sao map` generates a standalone local mission timeline
 
 Runtime dependency: `qrcode[pil]` for QR image generation. Windows and Unix compatible.
 
@@ -88,7 +89,22 @@ sao show <mission_id>
 sao verify <mission_id>
 sao open <mission_id>
 sao dashboard --port 8765
+sao map --open
 ```
+
+---
+
+## MapRoom
+
+Use `sao map` to generate a standalone local HTML timeline of recorded missions grouped by branch and status.
+
+Example:
+
+```bash
+python -m sao.cli map --open
+```
+
+The default output is `blackbox/maproom.html`.
 
 ---
 
@@ -170,6 +186,7 @@ The whole session folder is also compressed to `<mission_id>.zip`. Sessions are 
 | `sao verify-archive <path>.zip` | Verify SHA256 seals from a `.zip` archive |
 | `sao open <mission_id>` | Open the HTML mission card in the default browser |
 | `sao dashboard [--port N]` | Start a local dashboard (default port 8765) |
+| `sao map [--output PATH] [--open]` | Generate a standalone MapRoom mission timeline |
 
 Source: [`sao/`](sao/)
 

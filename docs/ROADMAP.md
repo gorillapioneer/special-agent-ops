@@ -50,21 +50,21 @@ This document tracks completed and planned work. Items are grouped by release mi
 
 ---
 
-## Planned
-
 ### v1.4 - MapRoom Repo Graph
 
 **Goal:** Produce a visual map of mission activity across branches and time - a control-room view of the repository's agent history.
 
-- [ ] Parse all `manifest.json` files in `blackbox/sessions/`
-- [ ] Group missions by git branch and date
-- [ ] Generate a standalone SVG or HTML timeline with no external charting libraries
-- [ ] Add `sao map` CLI command that writes `blackbox/maproom.html`
-- [ ] Link each mission node to its dashboard URL
+- [x] Parse all `manifest.json` files in `blackbox/sessions/`
+- [x] Group missions by git branch and date
+- [x] Generate a standalone HTML timeline with no external charting libraries
+- [x] Add `sao map` CLI command that writes `blackbox/maproom.html`
+- [x] Link each mission row to local card, summary, and QR image files when present
 
 **Why:** When many agents work in parallel across branches, a visual timeline makes it easier to review what happened and in what order.
 
 ---
+
+## Planned
 
 ### v1.5 - CI and GitHub PR Reports
 
