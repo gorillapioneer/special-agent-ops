@@ -25,6 +25,10 @@ Special Agent Ops records missions from any coding agent or shell workflow. It i
 
 The badges above describe compatibility and workflow support. They do not imply official endorsement by those tools or vendors.
 
+## Agent integration examples
+
+See [`docs/AGENT_INTEGRATIONS.md`](docs/AGENT_INTEGRATIONS.md) for copy/paste examples for Claude Code, Codex, Devin-style agents, Cursor/Copilot workflows, and generic shell commands.
+
 ---
 
 ## 60-second demo
