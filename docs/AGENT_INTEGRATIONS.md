@@ -77,3 +77,4 @@ Use `sao run` when you intentionally need shell features such as pipes, redirect
 4. Run `sao verify <mission_id>`.
 5. Open the HTML card.
 6. Link the mission card in the PR.
+7. After several missions, run `sao map --open` to review the agent timeline.

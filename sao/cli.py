@@ -4,6 +4,7 @@ cli.py — Special Agent Ops command-line interface.
 Commands:
     sao run --name "my mission" --command "pytest"
     sao wrap --name "my mission" -- pytest
+    sao map
     sao list
     sao show <mission_id>
     sao verify <mission_id>
@@ -11,10 +12,11 @@ Commands:
 
 import argparse
 import sys
+import webbrowser
 from pathlib import Path
 
 from sao.blackbox.recorder import format_command_argv, record_mission, record_mission_argv
-from sao.blackbox import browser, dashboard as dashboard_mod
+from sao.blackbox import browser, dashboard as dashboard_mod, maproom as maproom_mod
 
 
 # ── run ───────────────────────────────────────────────────────────────────────
@@ -245,6 +247,34 @@ def cmd_dashboard(args) -> int:
     return 0
 
 
+# ── map ───────────────────────────────────────────────────────────────────────
+
+def cmd_map(args) -> int:
+    sessions_root = browser.get_sessions_root(Path.cwd())
+    output_path = Path(args.output) if args.output else None
+    map_path = maproom_mod.write_maproom(
+        sessions_root=sessions_root,
+        output_path=output_path,
+    )
+
+    missions = maproom_mod.collect_maproom_missions(sessions_root)
+    width = 64
+    bar = "=" * width
+    print()
+    print(bar)
+    print("  SPECIAL AGENT OPS — MAPROOM")
+    print(bar)
+    print(f"  Output:    {map_path}")
+    print(f"  Missions:  {len(missions)}")
+    print(bar)
+    if args.open:
+        webbrowser.open(map_path.resolve().as_uri())
+        print("  Result: OPENED")
+        print(bar)
+    print()
+    return 0
+
+
 # ── open ─────────────────────────────────────────────────────────────────────
 
 def cmd_open(args) -> int:
@@ -327,6 +357,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  show            Inspect a mission session.\n"
             "  open            Open a mission HTML card in the default browser.\n"
             "  dashboard       Start a local dashboard server.\n"
+            "  map             Generate a standalone MapRoom mission timeline.\n"
             "  verify          Verify SHA256 seals for a mission session.\n"
             "  verify-archive  Verify a mission .zip archive directly.\n"
         ),
@@ -410,6 +441,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="TCP port to listen on (default: 8765).",
     )
     dash_p.set_defaults(func=cmd_dashboard)
+
+    # ── map ───────────────────────────────────────────────────────────────────
+    map_p = sub.add_parser(
+        "map",
+        help="Generate a standalone MapRoom mission timeline.",
+        description="Generate blackbox/maproom.html from recorded mission manifests.",
+    )
+    map_p.add_argument(
+        "--output",
+        help="Output HTML path (default: blackbox/maproom.html).",
+    )
+    map_p.add_argument(
+        "--open",
+        action="store_true",
+        help="Open the generated MapRoom HTML in the default browser.",
+    )
+    map_p.set_defaults(func=cmd_map)
 
     # ── open ──────────────────────────────────────────────────────────────────
     open_p = sub.add_parser(
