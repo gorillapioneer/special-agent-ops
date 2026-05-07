@@ -64,9 +64,23 @@ This document tracks completed and planned work. Items are grouped by release mi
 
 ---
 
+### v1.5 - PR Mission Reports
+
+**Goal:** Generate a paste-ready Markdown report from a recorded mission for GitHub pull requests.
+
+- [x] Add `sao pr-report <mission_id>`
+- [x] Print PR-ready Markdown to stdout by default
+- [x] Support `--output <path>` for writing the report to a file
+- [x] Include mission summary, verification commands, changed files, and local artifact paths
+- [x] Avoid embedding stdout, stderr, diffs, secrets, or archive contents
+
+**Why:** Reviewers need a compact summary of what the agent ran and how to verify it without digging through local session folders.
+
+---
+
 ## Planned
 
-### v1.5 - CI and GitHub PR Reports
+### v1.6 - CI and GitHub PR Reports
 
 **Goal:** Make mission records visible inside GitHub pull requests so reviewers can see what the agent did without leaving GitHub.
 

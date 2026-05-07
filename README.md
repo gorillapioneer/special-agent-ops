@@ -65,6 +65,7 @@ Copy the `<mission_id>` from the first command's output. Full demo script: [`doc
 - **Archive verification** — `sao verify-archive` confirms integrity from a `.zip` alone
 - **Local mission dashboard** — `sao dashboard` serves a mission index on `127.0.0.1`
 - **MapRoom timeline** — `sao map` generates a standalone local mission timeline
+- **PR mission reports** — `sao pr-report` prints GitHub-ready Markdown for a mission
 
 Runtime dependency: `qrcode[pil]` for QR image generation. Windows and Unix compatible.
 
@@ -90,6 +91,7 @@ sao verify <mission_id>
 sao open <mission_id>
 sao dashboard --port 8765
 sao map --open
+sao pr-report <mission_id>
 ```
 
 ---
@@ -105,6 +107,21 @@ python -m sao.cli map --open
 ```
 
 The default output is `blackbox/maproom.html`.
+
+---
+
+## PR Mission Reports
+
+Use `sao pr-report <mission_id>` to generate Markdown that can be pasted directly into a GitHub pull request.
+
+Examples:
+
+```bash
+python -m sao.cli pr-report <mission_id>
+python -m sao.cli pr-report <mission_id> --output pr_report.md
+```
+
+By default the report prints to stdout. With `--output`, SAO writes the Markdown file and prints its path.
 
 ---
 
@@ -187,6 +204,7 @@ The whole session folder is also compressed to `<mission_id>.zip`. Sessions are 
 | `sao open <mission_id>` | Open the HTML mission card in the default browser |
 | `sao dashboard [--port N]` | Start a local dashboard (default port 8765) |
 | `sao map [--output PATH] [--open]` | Generate a standalone MapRoom mission timeline |
+| `sao pr-report <mission_id> [--output PATH]` | Generate a GitHub PR-ready mission report |
 
 Source: [`sao/`](sao/)
 
