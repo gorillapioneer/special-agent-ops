@@ -1,31 +1,64 @@
-# Special Agent Ops — Roadmap
+# Special Agent Ops - Roadmap
 
-This document tracks planned future work. Items are grouped by intended release milestone. Priorities may shift based on community feedback.
+This document tracks completed and planned work. Items are grouped by release milestone. Priorities may shift based on community feedback.
 
 ---
 
-## v1.1 — QR Image Support
+## Completed
+
+### v1.1 - QR Image Support
 
 **Goal:** Generate an actual QR code image from the compact seal payload so missions can be printed, embedded in reports, or scanned from a screen.
 
-- [ ] Add `sao/blackbox/qr_image.py` using `qrcode` (optional dependency, gracefully absent)
-- [ ] Detect at runtime whether `qrcode` is installed; skip silently if not
-- [ ] Write `seal_qr_payload.png` into the session folder when available
-- [ ] Add `seal_card.html` embed (inline base64 PNG) when the image exists
-- [ ] Update `_DIR_HASH_EXCLUDE` to exclude `seal_qr_payload.png` (derived file)
-- [ ] Update session file table in README
+- [x] Add `sao/blackbox/qr_image.py` using `qrcode[pil]`
+- [x] Write `seal_qr.png` into each session folder
+- [x] Display `seal_qr.png` from `seal_card.html`
+- [x] Serve `seal_qr.png` from the local dashboard through a validated route
+- [x] Exclude `seal_qr.png` from `session_directory_sha256` because it is a derived artifact
+- [x] Update README and security model docs
 
-**Why:** The compact payload text already fits a QR code — generating the image is the last step to make it scannable without third-party tooling.
+**Why:** The compact payload text already fits a QR code. Generating the image makes it scannable without third-party tooling.
 
 ---
 
-## v1.2 — MapRoom Repo Graph
+### v1.2 - Agent Wrapper CLI
 
-**Goal:** Produce a visual map of mission activity across branches and time — a "control room" view of the repository's agent history.
+**Goal:** Add a safer wrapper command that records agents and local commands without requiring users to build shell strings.
+
+- [x] Add `sao wrap --name "..." -- <command> [args...]`
+- [x] Run wrapped commands as argv lists with `shell=False`
+- [x] Keep legacy `sao run --command "..."` for shell-string workflows
+- [x] Record `command_mode` in each mission manifest
+- [x] Record `command_argv` for wrapped missions
+- [x] Keep mission summaries, cards, dashboard, and browser output readable
+
+**Why:** Argument-list execution avoids shell parsing surprises while preserving the existing mission recording pipeline.
+
+---
+
+### v1.3 - Agent Integration Docs
+
+**Goal:** Provide copy/paste documentation for common AI coding agents and local verification workflows.
+
+- [x] Add `docs/AGENT_INTEGRATIONS.md`
+- [x] Document Claude Code, Codex, Devin-style agents, Cursor/Copilot workflows, and generic local commands
+- [x] Explain when to use `sao wrap` instead of `sao run`
+- [x] Add a recommended agent workflow for PR handoff
+- [x] Link integration examples from README
+
+**Why:** Clear examples make it easier to record real agent work consistently across different tools.
+
+---
+
+## Planned
+
+### v1.4 - MapRoom Repo Graph
+
+**Goal:** Produce a visual map of mission activity across branches and time - a control-room view of the repository's agent history.
 
 - [ ] Parse all `manifest.json` files in `blackbox/sessions/`
 - [ ] Group missions by git branch and date
-- [ ] Generate a standalone SVG or HTML timeline (no external charting libs)
+- [ ] Generate a standalone SVG or HTML timeline with no external charting libraries
 - [ ] Add `sao map` CLI command that writes `blackbox/maproom.html`
 - [ ] Link each mission node to its dashboard URL
 
@@ -33,20 +66,7 @@ This document tracks planned future work. Items are grouped by intended release 
 
 ---
 
-## v1.3 — Agent Wrappers
-
-**Goal:** Thin wrappers that automatically call `sao run` around common AI coding agent invocations so every agent session is recorded without manual intervention.
-
-- [ ] `sao wrap claude-code` — wraps a Claude Code CLI session
-- [ ] `sao wrap codex` — wraps an OpenAI Codex CLI session
-- [ ] Generic `sao wrap <command>` — records any subprocess session
-- [ ] Optional: `--mission-brief <file>` to attach a MISSION_BRIEF to the recorded session
-
-**Why:** Currently the user must explicitly call `sao run`. Wrappers make recording automatic and invisible.
-
----
-
-## v1.4 — CI and GitHub PR Reports
+### v1.5 - CI and GitHub PR Reports
 
 **Goal:** Make mission records visible inside GitHub pull requests so reviewers can see what the agent did without leaving GitHub.
 
@@ -59,7 +79,7 @@ This document tracks planned future work. Items are grouped by intended release 
 
 ---
 
-## Later — Compressed Binary Event Stream
+## Later - Compressed Binary Event Stream
 
 **Goal:** Replace plain-text session files with a compact binary event log for high-frequency agent sessions that produce large amounts of output.
 
@@ -69,7 +89,7 @@ This document tracks planned future work. Items are grouped by intended release 
 - [ ] Maintain backward compatibility with the existing plain-text session format
 - [ ] Define a migration path for existing sessions
 
-**Why:** For agents that run many commands in a single session, plain-text files become large quickly. A compressed binary log reduces storage by 10–50x while preserving full replay capability.
+**Why:** For agents that run many commands in a single session, plain-text files become large quickly. A compressed binary log reduces storage while preserving full replay capability.
 
 ---
 
