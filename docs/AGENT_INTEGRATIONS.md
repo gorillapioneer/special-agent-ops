@@ -76,5 +76,6 @@ Use `sao run` when you intentionally need shell features such as pipes, redirect
 3. Run `sao wrap` around the test/validation command or agent invocation.
 4. Run `sao verify <mission_id>`.
 5. Open the HTML card.
-6. Link the mission card in the PR.
-7. After several missions, run `sao map --open` to review the agent timeline.
+6. Run `sao pr-report <mission_id>` and paste the report into the PR.
+7. Link the mission card in the PR.
+8. After several missions, run `sao map --open` to review the agent timeline.

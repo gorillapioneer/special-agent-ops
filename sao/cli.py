@@ -5,6 +5,7 @@ Commands:
     sao run --name "my mission" --command "pytest"
     sao wrap --name "my mission" -- pytest
     sao map
+    sao pr-report <mission_id>
     sao list
     sao show <mission_id>
     sao verify <mission_id>
@@ -16,7 +17,12 @@ import webbrowser
 from pathlib import Path
 
 from sao.blackbox.recorder import format_command_argv, record_mission, record_mission_argv
-from sao.blackbox import browser, dashboard as dashboard_mod, maproom as maproom_mod
+from sao.blackbox import (
+    browser,
+    dashboard as dashboard_mod,
+    maproom as maproom_mod,
+    pr_report as pr_report_mod,
+)
 
 
 # ── run ───────────────────────────────────────────────────────────────────────
@@ -275,7 +281,35 @@ def cmd_map(args) -> int:
     return 0
 
 
-# ── open ─────────────────────────────────────────────────────────────────────
+# -- pr-report ---------------------------------------------------------------
+
+def cmd_pr_report(args) -> int:
+    sessions_root = browser.get_sessions_root(Path.cwd())
+    try:
+        session_dir = browser.find_mission(sessions_root, args.mission_id)
+    except FileNotFoundError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+    try:
+        if args.output:
+            report_path = pr_report_mod.write_pr_report(
+                session_dir=session_dir,
+                output_path=Path(args.output),
+            )
+            print(report_path)
+        else:
+            payload = pr_report_mod.build_pr_report_payload(session_dir)
+            markdown = pr_report_mod.render_pr_report_markdown(payload)
+            print(markdown, end="" if markdown.endswith("\n") else "\n")
+    except FileNotFoundError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+    return 0
+
+
+# -- open --------------------------------------------------------------------
 
 def cmd_open(args) -> int:
     sessions_root = browser.get_sessions_root(Path.cwd())
@@ -358,6 +392,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  open            Open a mission HTML card in the default browser.\n"
             "  dashboard       Start a local dashboard server.\n"
             "  map             Generate a standalone MapRoom mission timeline.\n"
+            "  pr-report       Print a GitHub PR-ready mission report.\n"
             "  verify          Verify SHA256 seals for a mission session.\n"
             "  verify-archive  Verify a mission .zip archive directly.\n"
         ),
@@ -459,7 +494,23 @@ def build_parser() -> argparse.ArgumentParser:
     )
     map_p.set_defaults(func=cmd_map)
 
-    # ── open ──────────────────────────────────────────────────────────────────
+    # -- pr-report -----------------------------------------------------------
+    pr_report_p = sub.add_parser(
+        "pr-report",
+        help="Print a GitHub PR-ready mission report.",
+        description=(
+            "Generate Markdown from a recorded mission that can be pasted "
+            "directly into a GitHub pull request."
+        ),
+    )
+    pr_report_p.add_argument("mission_id", help="Mission ID to report.")
+    pr_report_p.add_argument(
+        "--output",
+        help="Write the report to a Markdown file instead of stdout.",
+    )
+    pr_report_p.set_defaults(func=cmd_pr_report)
+
+    # -- open ----------------------------------------------------------------
     open_p = sub.add_parser(
         "open",
         help="Open a mission HTML card in the default browser.",
