@@ -5,7 +5,9 @@ Flow:
     1.  Generate a unique mission_id from timestamp + sanitised name.
     2.  Create the session folder under blackbox/sessions/.
     3.  Capture git state *before* running the command.
-    4.  Run the command with subprocess.
+    4.  Run the command with subprocess (in its own process group on POSIX;
+        surviving background children are killed after the main process
+        exits, so the after-state and seal bind to a quiesced snapshot).
     5.  Capture git state *after*.
     6.  Write raw artefacts (manifest.json, stdout.txt, git_diff.patch, …).
     7.  Compress the session folder into a .zip archive.
@@ -52,6 +54,91 @@ def format_command_argv(command_argv: list[str]) -> str:
     return shlex.join(command_argv)
 
 
+# Grace period between SIGTERM and SIGKILL when reaping surviving
+# process-group members after the wrapped command exits (POSIX only).
+_KILL_GRACE_SECONDS = 2.0
+
+
+def _terminate_process_group(pgid: int) -> None:
+    """Kill any surviving members of process group *pgid* (POSIX only).
+
+    SIGTERM first, a brief grace period, then SIGKILL.  Never raises: the
+    group usually no longer exists (the common case — no background
+    stragglers), and permission errors are ignored.
+    """
+    import signal
+    import time
+
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError, OSError):
+        return
+    deadline = time.monotonic() + _KILL_GRACE_SECONDS
+    while time.monotonic() < deadline:
+        try:
+            os.killpg(pgid, 0)          # any members left?
+        except (ProcessLookupError, PermissionError, OSError):
+            return
+        time.sleep(0.05)
+    try:
+        os.killpg(pgid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        pass
+
+
+def _execute_command(command, *, shell: bool, cwd=None):
+    """Run the wrapped command and return (stdout, stderr, exit_code).
+
+    On POSIX the command runs in its own session/process group
+    (``start_new_session=True``) and, after the main process exits, any
+    surviving group members (background children the command left behind)
+    are killed BEFORE the caller captures after-state and seals — so the
+    seal binds to a quiesced snapshot, not one a straggler can mutate
+    mid-hash.  Output goes to temp files rather than pipes so a lingering
+    child holding the pipe open cannot stall collection.
+
+    On Windows there is no process group/session equivalent here; behaviour
+    falls back to a plain ``subprocess.run``.
+    """
+    if os.name != "posix":
+        proc = subprocess.run(
+            command,
+            shell=shell,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        return proc.stdout, proc.stderr, proc.returncode
+
+    import tempfile
+
+    # Popen (not run): we need the child's pid to address its process
+    # group after exit.  Running the user's own command is this module's
+    # documented purpose (see _run_shell_command).
+    from subprocess import Popen
+
+    with tempfile.TemporaryFile() as out_f, tempfile.TemporaryFile() as err_f:
+        proc = Popen(
+            command,
+            shell=shell,
+            cwd=cwd,
+            stdout=out_f,
+            stderr=err_f,
+            start_new_session=True,
+        )
+        exit_code = proc.wait()
+        # The session leader is proc.pid; reap any group stragglers now,
+        # before after-state capture and sealing.
+        _terminate_process_group(proc.pid)
+        out_f.seek(0)
+        err_f.seek(0)
+        stdout_text = out_f.read().decode("utf-8", errors="replace")
+        stderr_text = err_f.read().decode("utf-8", errors="replace")
+        return stdout_text, stderr_text, exit_code
+
+
 def _run_shell_command(command: str, cwd=None):
     """Execute *command* in a shell. Returns (stdout, stderr, exit_code).
 
@@ -60,16 +147,7 @@ def _run_shell_command(command: str, cwd=None):
     exactly as the user typed it — on Windows this uses cmd.exe, on Unix /bin/sh.
     """
     try:
-        proc = subprocess.run(
-            command,
-            shell=True,
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-        )
-        return proc.stdout, proc.stderr, proc.returncode
+        return _execute_command(command, shell=True, cwd=cwd)
     except Exception as exc:
         return "", f"Failed to start command: {exc}", 1
 
@@ -77,16 +155,7 @@ def _run_shell_command(command: str, cwd=None):
 def _run_argv_command(command_argv: list[str], cwd=None):
     """Execute *command_argv* without a shell. Returns stdout, stderr, exit_code."""
     try:
-        proc = subprocess.run(
-            command_argv,
-            shell=False,
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-        )
-        return proc.stdout, proc.stderr, proc.returncode
+        return _execute_command(command_argv, shell=False, cwd=cwd)
     except Exception as exc:
         return "", f"Failed to start command: {exc}", 1
 
