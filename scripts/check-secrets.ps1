@@ -73,7 +73,7 @@ $ContentPatterns = @(
     @{ Level="ALERT"; Description="Slack token (xox...)";                 Pattern="xox[bpars]-[A-Za-z0-9\-]+" }
     @{ Level="ALERT"; Description="Google OAuth token (ya29.)";           Pattern="ya29\.[A-Za-z0-9_\-]+" }
     @{ Level="ALERT"; Description="SSH private key material";             Pattern="-----BEGIN (RSA|EC|DSA|OPENSSH) PRIVATE KEY-----" }
-    @{ Level="ALERT"; Description="Database connection string with password"; Pattern="[a-z]+://[^:]+:[^@]{4,}@" }
+    @{ Level="ALERT"; Description="Database connection string with password"; Pattern="[a-z]+://[^:\r\n]+:[^@\r\n]{4,}@" }
     @{ Level="ALERT"; Description="Hardcoded password/secret assignment"; Pattern="(?i)(password|passwd|secret)\s*=\s*['""][^'""]{6,}['""]" }
     @{ Level="ALERT"; Description="Hardcoded API key assignment";         Pattern="(?i)(api_key|apikey|access_token|auth_token)\s*=\s*['""][^'""]{8,}['""]" }
     @{ Level="WARN";  Description="Possible JWT token";                   Pattern="eyJ[A-Za-z0-9_\-]{20,}\.[A-Za-z0-9_\-]{20,}\.[A-Za-z0-9_\-]{20,}" }
