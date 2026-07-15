@@ -66,6 +66,12 @@ Copy the `<mission_id>` from the first command's output. Full demo script: [`doc
 - **Local mission dashboard** — `sao dashboard` serves a mission index on `127.0.0.1`
 - **MapRoom timeline** — `sao map` generates a standalone local mission timeline
 - **PR mission reports** — `sao pr-report` prints GitHub-ready Markdown for a mission
+- **Merkle transparency ledger** *(prototype)* — `sao ledger` proves the mission log is append-only
+- **Git-native attestations** *(prototype)* — `sao attest` / `--attest` bind commits to sealed missions via `refs/notes/sao`
+- **Flight plans** *(prototype)* — `sao flight-plan` pre-declares mission scope, sealed into the session
+- **PR provenance gate** *(prototype)* — `sao verify-pr` verifies every commit's attestation, ledger proof, and scope
+- **Line-level provenance** *(prototype)* — `sao blame` maps each line to the agent mission that wrote it
+- **MCP server** *(prototype)* — `sao mcp` gives live agents provenance tools over the Model Context Protocol
 
 Runtime dependency: `qrcode[pil]` for QR image generation. Windows and Unix compatible.
 
@@ -122,6 +128,29 @@ python -m sao.cli pr-report <mission_id> --output pr_report.md
 ```
 
 By default the report prints to stdout. With `--output`, SAO writes the Markdown file and prints its path.
+
+---
+
+## Verifiable provenance (prototype)
+
+Beyond recording, SAO can now *prove* provenance: an RFC 6962-style Merkle
+transparency ledger over mission seals (`sao ledger`), attestation
+statements attached to commits as git notes (`sao attest`, `sao run
+--attest`), pre-declared mission scope (`sao flight-plan`), a PR enforcement
+gate (`sao verify-pr`, with a CI template in
+[`templates/verify-pr.yml`](templates/verify-pr.yml)), line-level
+provenance (`sao blame`), and a stdio MCP server for live agents
+(`sao mcp`).
+
+```bash
+sao flight-plan --name "add greeter" --intent "..." --scope "src/**"
+sao run --name "add greeter" --attest --command "<agent command>"
+sao ledger root
+sao verify-pr --base origin/main --head HEAD --require-attestation
+sao blame src/greeter.py
+```
+
+Full model, demo sequence, and trust notes: [docs/PROVENANCE.md](docs/PROVENANCE.md).
 
 ---
 
@@ -205,6 +234,12 @@ The whole session folder is also compressed to `<mission_id>.zip`. Sessions are 
 | `sao dashboard [--port N]` | Start a local dashboard (default port 8765) |
 | `sao map [--output PATH] [--open]` | Generate a standalone MapRoom mission timeline |
 | `sao pr-report <mission_id> [--output PATH]` | Generate a GitHub PR-ready mission report |
+| `sao flight-plan --name ... --intent ... --scope GLOB` | Pre-declare the next mission's scope |
+| `sao attest <mission_id>` | Attest a mission (ledger + `refs/notes/sao`) |
+| `sao ledger root [--qr PATH]` / `sao ledger verify` | Inspect / verify the Merkle transparency ledger |
+| `sao verify-pr --base REF --head REF` | Verify provenance for all commits in a PR range |
+| `sao blame <file> [--json]` | Line-level provenance for a file |
+| `sao mcp` | Run the provenance MCP server over stdio |
 
 Source: [`sao/`](sao/)
 
