@@ -99,6 +99,7 @@ def _record_mission(
     repo_path: Path | None = None,
     command_mode: str = "shell",
     command_argv: list[str] | None = None,
+    attest: bool = False,
 ) -> dict:
     """Run *command*, record everything, and return a result dict.
 
@@ -191,6 +192,13 @@ def _record_mission(
     _write("git_status_after.txt",  status_after)
     _write("git_diff.patch",        diff_text)
 
+    # ── Flight plan (provenance) ──────────────────────────────────────────────
+    # A pending flight plan (blackbox/flightplan.pending.json) is consumed
+    # into the session BEFORE compressing/sealing so the seal covers it.
+    from sao.provenance import flightplan as flightplan_mod
+
+    consumed_flightplan = flightplan_mod.consume_pending(repo_path, session_dir)
+
     # ── Compress ──────────────────────────────────────────────────────────────
     # Compress before sealing so the archive SHA256 goes into the seal.
     zip_path = compressor.compress_session(session_dir)
@@ -249,7 +257,19 @@ def _record_mission(
 
     status = "PASS" if exit_code == 0 else "FAIL"
 
+    # ── Attestation (provenance, opt-in) ──────────────────────────────────────
+    # Appends the mission to the transparency ledger, writes provenance.json
+    # (excluded from the seal's directory hash), and attaches a git note to
+    # the new HEAD commit when the mission ended on one.
+    attest_result = None
+    if attest:
+        from sao.provenance import attest as attest_mod
+
+        attest_result = attest_mod.attest_session(repo_path, session_dir)
+
     return {
+        "flightplan_consumed":  consumed_flightplan is not None,
+        "attestation":          attest_result,
         "mission_id":           mission_id,
         "name":                 name,
         "command":              command,
@@ -271,13 +291,19 @@ def _record_mission(
     }
 
 
-def record_mission(name: str, command: str, repo_path: Path = None) -> dict:
+def record_mission(
+    name: str,
+    command: str,
+    repo_path: Path = None,
+    attest: bool = False,
+) -> dict:
     """Run a shell command string, record everything, and return a result dict."""
     return _record_mission(
         name=name,
         command=command,
         repo_path=repo_path,
         command_mode="shell",
+        attest=attest,
     )
 
 
@@ -285,6 +311,7 @@ def record_mission_argv(
     name: str,
     command_argv: list[str],
     repo_path: Path = None,
+    attest: bool = False,
 ) -> dict:
     """Run an argv command without a shell, record everything, and return a result dict."""
     command = format_command_argv(command_argv)
@@ -294,4 +321,5 @@ def record_mission_argv(
         repo_path=repo_path,
         command_mode="argv",
         command_argv=command_argv,
+        attest=attest,
     )
