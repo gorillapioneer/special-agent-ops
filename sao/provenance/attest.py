@@ -1,11 +1,14 @@
 """
 attest.py — git-native attestation statements for recorded missions.
 
-An attestation is a small, versioned JSON statement ("sao-attestation/1")
+An attestation is a small, versioned JSON statement ("sao-attestation/2")
 binding together:
 
   * the mission (id, name, agent command info, exit code),
   * the git context (repo, branch, head before/after, diff hash),
+  * the git object IDs of the result commit (``git_objects``: parent/result
+    commit OIDs, the result tree OID, and per-changed-path blob OID + mode)
+    — omitted when the mission did not end on a new commit,
   * the tamper-evident seal (seal.json manifest hash),
   * the transparency log position (ledger leaf index / root),
   * the previous attestation (hash chain via parent_attestation_sha256),
@@ -16,9 +19,17 @@ and its SHA256 is the attestation's identity.
 
 Storage:
   * always: ``provenance.json`` in the session folder (written AFTER sealing,
-    so it is excluded from the seal's directory hash — see seal.py),
+    so it is excluded from the seal's directory hash — see seal.py). This is
+    the DURABLE store of the statement.
   * when the mission ended on a new commit: a git note under
-    ``refs/notes/sao`` on that commit (canonical JSON as the note body).
+    ``refs/notes/sao`` on that commit. The note is a DISCOVERY INDEX, not a
+    durable security store: notes can be force-replaced without changing the
+    commit SHA and are not fetched by default. The note body is the canonical
+    statement plus a ``payload_sha256`` field (SHA256 of the statement's
+    canonical JSON) so the note can be cross-checked against the session copy.
+
+Verifiers must accept both "sao-attestation/1" and "sao-attestation/2"
+statements (v1 predates ``git_objects`` and ``payload_sha256``).
 
 Optional signing: if ``SAO_SIGNING_KEY_FILE`` points to an ssh private key
 and ``ssh-keygen -Y sign`` is available, the canonical JSON is signed
@@ -39,7 +50,12 @@ from pathlib import Path
 from sao.blackbox.seal import sha256_file
 from . import ledger as ledger_mod
 
-ATTESTATION_VERSION = "sao-attestation/1"
+ATTESTATION_VERSION = "sao-attestation/2"
+#: Versions a verifier must accept. v1 statements predate the git_objects
+#: section and the note payload_sha256 cross-check field.
+SUPPORTED_VERSIONS = ("sao-attestation/1", "sao-attestation/2")
+#: Extra field added to the git-note copy only (never part of the statement).
+NOTE_PAYLOAD_FIELD = "payload_sha256"
 NOTES_REF = "refs/notes/sao"
 SIGN_NAMESPACE = "sao-attestation"
 
@@ -79,6 +95,65 @@ def _repo_identity(repo_path: Path) -> str:
     return url if url else Path(repo_path).name
 
 
+def _rev_parse(repo_path: Path, ref: str):
+    proc = _git(["rev-parse", "--verify", ref], cwd=repo_path)
+    out = proc.stdout.strip()
+    return out if proc.returncode == 0 and out else None
+
+
+def collect_git_objects(repo_path: Path, head_before, head_after):
+    """Resolve the git object IDs of the mission's result commit.
+
+    Returns a dict binding the attestation to immutable git objects rather
+    than diff text:
+
+        {"parent_commit": <head_before>,
+         "commit":        <head_after>,
+         "tree":          <result tree OID>,
+         "changed": [{"path", "blob", "mode", "status"}, ...]}
+
+    Deleted paths carry ``blob``/``mode`` of None and status "D".
+    Returns None when the mission did not end on a new commit (head unknown
+    or unchanged) or when the objects cannot be resolved.
+    """
+    if (
+        not head_after
+        or head_after == "unknown"
+        or head_after == head_before
+    ):
+        return None
+    tree = _rev_parse(repo_path, f"{head_after}^{{tree}}")
+    if tree is None:
+        return None
+
+    proc = _git(
+        ["diff-tree", "--no-commit-id", "--root", "-r", head_after],
+        cwd=repo_path,
+    )
+    changed = []
+    for line in proc.stdout.splitlines():
+        if not line.startswith(":"):
+            continue
+        meta, _, path = line.partition("\t")
+        parts = meta[1:].split()
+        if len(parts) < 5 or not path:
+            continue
+        _old_mode, new_mode, _old_oid, new_oid, status = parts[:5]
+        deleted = status.startswith("D")
+        changed.append({
+            "path": path,
+            "blob": None if deleted else new_oid,
+            "mode": None if deleted else new_mode,
+            "status": status[:1],
+        })
+    return {
+        "parent_commit": head_before,
+        "commit": head_after,
+        "tree": tree,
+        "changed": changed,
+    }
+
+
 def attach_git_note(repo_path: Path, commit: str, note_text: str) -> bool:
     """Attach *note_text* to *commit* under refs/notes/sao (force-replace).
 
@@ -109,6 +184,21 @@ def read_git_note(repo_path: Path, commit: str):
         return json.loads(text)
     except json.JSONDecodeError:
         return None
+
+
+def note_statement_and_payload(note):
+    """Split a parsed git note into (statement, payload_sha256).
+
+    v2 notes carry an extra ``payload_sha256`` field (the SHA256 of the
+    statement's canonical JSON) so the note can be cross-checked against
+    the session's durable ``provenance.json`` copy.  v1 notes have no such
+    field: the payload half is None and the statement is the note itself.
+    """
+    if not isinstance(note, dict):
+        return note, None
+    payload = note.get(NOTE_PAYLOAD_FIELD)
+    statement = {k: v for k, v in note.items() if k != NOTE_PAYLOAD_FIELD}
+    return statement, payload
 
 
 # ── Parent discovery (hash chain) ────────────────────────────────────────────
@@ -189,7 +279,16 @@ def build_attestation(repo_path: Path, session_dir: Path) -> dict:
     if manifest.get("command_argv"):
         agent["command_argv"] = manifest["command_argv"]
 
-    return {
+    # Bind to git object IDs, not just diff text: the result commit's tree
+    # OID and each changed path's blob OID + mode.  Omitted when the mission
+    # did not end on a new commit.
+    git_objects = collect_git_objects(
+        repo_path,
+        manifest.get("git_commit_before"),
+        manifest.get("git_commit_after"),
+    )
+
+    statement = {
         "version": ATTESTATION_VERSION,
         "mission_id": mission_id,
         "mission_name": manifest.get("name"),
@@ -211,6 +310,9 @@ def build_attestation(repo_path: Path, session_dir: Path) -> dict:
         "parent_attestation_sha256": parent_sha256,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
+    if git_objects is not None:
+        statement["git_objects"] = git_objects
+    return statement
 
 
 # ── Optional ssh signing ─────────────────────────────────────────────────────
@@ -312,7 +414,13 @@ def attest_session(repo_path: Path, session_dir: Path) -> dict:
         and head_after != "unknown"
         and head_after != head_before
     ):
-        note_attached = attach_git_note(repo_path, head_after, text)
+        # The note is a discovery index: the statement plus payload_sha256
+        # (hash of the statement's canonical JSON) so verifiers can
+        # cross-check the note against the durable session copy.
+        note_body = canonical_json(
+            {**statement, NOTE_PAYLOAD_FIELD: attestation_sha256(statement)}
+        )
+        note_attached = attach_git_note(repo_path, head_after, note_body)
         note_commit = head_after if note_attached else None
 
     signature_path = sign_attestation(provenance_path)

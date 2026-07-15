@@ -13,11 +13,23 @@ verify_pr.py — the enforcement gate: verify provenance across a PR range.
                       is append-only-consistent with the current log,
   * diff            — diff_sha256 matches the recorded session's
                       git_diff.patch when the session folder still exists,
-  * session copy    — the note matches the session's provenance.json,
+  * git objects     — the recorded result tree OID matches the commit's
+                      actual tree, and each recorded changed-path blob OID
+                      and mode matches ``git ls-tree`` reality (v2
+                      attestations; v1 statements predate this and SKIP),
+  * session copy    — the note matches the session's provenance.json and,
+                      for v2 notes, the note's payload_sha256 matches the
+                      SHA256 of the session copy.  When the session folder
+                      is gone this is a WARN: a git note alone is
+                      unverifiable discovery metadata (notes can be
+                      force-replaced without changing the commit SHA),
   * signature       — provenance.json.sig verifies when present,
   * scope           — files changed in the commit all match the mission's
                       flight-plan globs (WARN on drift, FAIL with
                       --strict-scope).
+
+Both "sao-attestation/1" and "sao-attestation/2" statements are accepted;
+unknown versions FAIL.
 
 Unattested commits are WARN by default, FAIL with --require-attestation.
 Exit code 0 when the gate passes, 1 when it fails.
@@ -171,6 +183,79 @@ def _check_ledger(statement, ledger) -> list:
     return checks
 
 
+def _check_git_objects(repo_path, statement, commit) -> dict:
+    """Verify recorded git object IDs against the actual commit.
+
+    v2 attestations record the result commit's tree OID and, per changed
+    path, the blob OID and file mode.  Those must match what the commit
+    actually contains — a diff hash can only be checked against the
+    recorded diff text, but object IDs are checked against git itself.
+    """
+    gobj = statement.get("git_objects")
+    if gobj is None:
+        if statement.get("version") == "sao-attestation/1":
+            return _check(
+                "git-objects", SKIP,
+                "attestation v1 predates git object binding",
+            )
+        return _check(
+            "git-objects", SKIP,
+            "no git_objects recorded (mission ended without a new commit)",
+        )
+
+    recorded_commit = gobj.get("commit")
+    if recorded_commit != commit:
+        return _check(
+            "git-objects", FAIL,
+            f"recorded result commit {str(recorded_commit)[:10]} is not "
+            f"the noted commit {commit[:10]}",
+        )
+
+    proc = _git(["rev-parse", "--verify", f"{commit}^{{tree}}"], cwd=repo_path)
+    actual_tree = proc.stdout.strip()
+    if proc.returncode != 0 or not actual_tree:
+        return _check("git-objects", FAIL, "could not resolve commit tree")
+    if actual_tree != gobj.get("tree"):
+        return _check(
+            "git-objects", FAIL,
+            f"recorded tree OID does not match actual tree {actual_tree[:10]}",
+        )
+
+    # One recursive ls-tree, then compare each recorded changed path.
+    proc = _git(["ls-tree", "-r", commit], cwd=repo_path)
+    if proc.returncode != 0:
+        return _check("git-objects", FAIL, "git ls-tree failed")
+    tree_map = {}
+    for line in proc.stdout.splitlines():
+        meta, _, path = line.partition("\t")
+        parts = meta.split()
+        if len(parts) >= 3 and path:
+            tree_map[path] = (parts[0], parts[2])   # (mode, oid)
+
+    mismatches = []
+    for entry in gobj.get("changed", []):
+        path = entry.get("path")
+        if entry.get("status") == "D":
+            if path in tree_map:
+                mismatches.append(f"{path} (recorded deleted, present)")
+            continue
+        actual = tree_map.get(path)
+        if actual is None:
+            mismatches.append(f"{path} (missing from tree)")
+        elif actual != (entry.get("mode"), entry.get("blob")):
+            mismatches.append(f"{path} (blob/mode mismatch)")
+    if mismatches:
+        return _check(
+            "git-objects", FAIL,
+            "recorded blob OIDs do not match tree: " + ", ".join(mismatches[:5]),
+        )
+    return _check(
+        "git-objects", OK,
+        f"tree {actual_tree[:10]} and {len(gobj.get('changed', []))} "
+        f"changed path(s) match git objects",
+    )
+
+
 def _check_diff(repo_path, statement) -> dict:
     mission_id = statement.get("mission_id", "")
     session_dir = _session_dir_for(repo_path, mission_id)
@@ -187,17 +272,37 @@ def _check_diff(repo_path, statement) -> dict:
     return _check("diff", FAIL, "diff_sha256 does not match session diff")
 
 
-def _check_session_copy(repo_path, statement, note_text) -> dict:
+def _check_session_copy(repo_path, statement, note_text, note_payload_sha) -> dict:
     mission_id = statement.get("mission_id", "")
     session_dir = _session_dir_for(repo_path, mission_id)
     if session_dir is None:
-        return _check("session-copy", SKIP, "session folder not on disk")
+        return _check(
+            "session-copy", WARN,
+            "session folder not on disk — a git note alone is unverifiable "
+            "discovery metadata (notes can be replaced without changing the "
+            "commit SHA)",
+        )
     _, session_text = attest.load_attestation(session_dir)
     if session_text is None:
         return _check("session-copy", WARN, "session has no provenance.json")
-    if session_text == note_text:
-        return _check("session-copy", OK, "git note matches provenance.json")
-    return _check("session-copy", FAIL, "git note differs from provenance.json")
+    if session_text != note_text:
+        return _check(
+            "session-copy", FAIL, "git note differs from provenance.json"
+        )
+    if note_payload_sha is not None:
+        import hashlib
+
+        session_sha = hashlib.sha256(session_text.encode("utf-8")).hexdigest()
+        if note_payload_sha != session_sha:
+            return _check(
+                "session-copy", FAIL,
+                "note payload_sha256 does not match session provenance.json",
+            )
+        return _check(
+            "session-copy", OK,
+            "git note matches provenance.json (payload_sha256 cross-checked)",
+        )
+    return _check("session-copy", OK, "git note matches provenance.json")
 
 
 def _check_signature(repo_path, statement) -> dict:
@@ -271,18 +376,36 @@ def verify_pr(
             ))
         else:
             attested += 1
-            entry["mission_id"] = note.get("mission_id")
-            note_text = attest.canonical_json(note)
-            entry["checks"].append(_check(
-                "attestation", OK, f"mission {note.get('mission_id')}"
-            ))
-            entry["checks"].append(_check_hash_chain(repo_path, note, ledger))
-            entry["checks"].extend(_check_ledger(note, ledger))
-            entry["checks"].append(_check_diff(repo_path, note))
-            entry["checks"].append(_check_session_copy(repo_path, note, note_text))
-            entry["checks"].append(_check_signature(repo_path, note))
+            # A v2 note is the statement plus payload_sha256; strip the
+            # payload field before treating the note as a statement.
+            statement, note_payload_sha = attest.note_statement_and_payload(note)
+            entry["mission_id"] = statement.get("mission_id")
+            note_text = attest.canonical_json(statement)
+            version = statement.get("version")
+            if version in attest.SUPPORTED_VERSIONS:
+                entry["checks"].append(_check(
+                    "attestation", OK,
+                    f"mission {statement.get('mission_id')} ({version})",
+                ))
+            else:
+                entry["checks"].append(_check(
+                    "attestation", FAIL,
+                    f"unsupported attestation version: {version!r}",
+                ))
+            entry["checks"].append(_check_hash_chain(repo_path, statement, ledger))
+            entry["checks"].extend(_check_ledger(statement, ledger))
+            entry["checks"].append(_check_diff(repo_path, statement))
             entry["checks"].append(
-                _check_scope(repo_path, note, commit, strict_scope)
+                _check_git_objects(repo_path, statement, commit)
+            )
+            entry["checks"].append(
+                _check_session_copy(
+                    repo_path, statement, note_text, note_payload_sha
+                )
+            )
+            entry["checks"].append(_check_signature(repo_path, statement))
+            entry["checks"].append(
+                _check_scope(repo_path, statement, commit, strict_scope)
             )
 
         if any(c["level"] == FAIL for c in entry["checks"]):
