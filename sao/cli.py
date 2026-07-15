@@ -15,6 +15,9 @@ Commands:
     sao verify-pr --base main --head HEAD [--min-tier ci-verified]
     sao ci-issue --commit <oid> --signer hmac
     sao ci-verify --commit <oid> --attestation <path>
+    sao checkpoint emit | sao checkpoint verify --checkpoint <path>
+    sao witness cosign --checkpoint <path> --state-dir <dir> --name <name>
+    sao anchor push --remote <url> | sao anchor verify --remote <url>
     sao blame <file>
     sao mcp
 """
@@ -33,14 +36,17 @@ from sao.blackbox import (
     pr_report as pr_report_mod,
 )
 from sao.provenance import (
+    anchor as anchor_mod,
     attest as attest_mod,
     blame as blame_mod,
+    checkpoint as checkpoint_mod,
     ci_issue as ci_issue_mod,
     envelope as envelope_mod,
     flightplan as flightplan_mod,
     ledger as ledger_mod,
     mcp_server as mcp_mod,
     verify_pr as verify_pr_mod,
+    witness as witness_mod,
 )
 
 
@@ -566,6 +572,121 @@ def cmd_ci_verify(args) -> int:
     return 0 if report["ok"] else 1
 
 
+# ── checkpoint ───────────────────────────────────────────────────────────────
+
+def cmd_checkpoint_emit(args) -> int:
+    try:
+        signer = checkpoint_mod.make_operator_signer(args.signer, args.key_file)
+        cp = checkpoint_mod.build_checkpoint(
+            Path.cwd(),
+            origin=args.origin,
+            bundle_proof_from=args.bundle_proof_from,
+        )
+        checkpoint_mod.sign_checkpoint(cp, signer)
+    except (ValueError, FileNotFoundError, RuntimeError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    out_path = (
+        Path(args.out) if args.out
+        else Path.cwd() / checkpoint_mod.DEFAULT_CHECKPOINT_PATH
+    )
+    checkpoint_mod.write_checkpoint(cp, out_path)
+
+    width = 64
+    bar = "=" * width
+    print()
+    print(bar)
+    print("  SPECIAL AGENT OPS — CHECKPOINT")
+    print(bar)
+    print(f"  Origin:     {cp['origin']}")
+    print(f"  Tree Size:  {cp['tree_size']}")
+    print(f"  Root Hash:  {cp['root_hash']}")
+    print(f"  Signed:     {'yes (' + args.signer + ')' if cp['signature'] else 'NO — UNSIGNED'}")
+    if cp.get("bundled_proofs"):
+        print(f"  Bundled:    consistency proof from size "
+              f"{cp['bundled_proofs'][0]['old_size']}")
+    print(f"  Checkpoint: {out_path}")
+    print(bar)
+    print("  Hand this file to witnesses (sao witness cosign) — they run")
+    print("  OUTSIDE this repo and need ledger access via their own clone")
+    print("  or the bundled proof (--bundle-proof-from).")
+    print(bar)
+    print()
+    return 0
+
+
+def cmd_checkpoint_verify(args) -> int:
+    try:
+        cp = checkpoint_mod.load_checkpoint(args.checkpoint)
+    except (OSError, ValueError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    report = checkpoint_mod.verify_checkpoint(
+        Path.cwd(),
+        cp,
+        require_witnesses=args.require_witnesses,
+        witness_keys_path=args.witness_keys,
+        hmac_key_file=args.hmac_key_file,
+        allowed_signers=args.allowed_signers,
+        identity=args.signer_identity,
+    )
+    print(checkpoint_mod.render_report(report, "CHECKPOINT VERIFY"))
+    return 0 if report["ok"] else 1
+
+
+# ── witness ──────────────────────────────────────────────────────────────────
+
+def cmd_witness_cosign(args) -> int:
+    try:
+        signer = checkpoint_mod.make_cosign_signer(args.signer, args.key_file)
+    except (ValueError, FileNotFoundError, RuntimeError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    report = witness_mod.cosign(
+        checkpoint_path=args.checkpoint,
+        state_dir=args.state_dir,
+        name=args.name,
+        signer=signer,
+        ledger_repo=args.ledger_repo,
+        operator_hmac_key_file=args.operator_hmac_key_file,
+        operator_allowed_signers=args.operator_allowed_signers,
+    )
+    print(witness_mod.render_report(report))
+    return 0 if report["ok"] else 1
+
+
+def cmd_witness_state(args) -> int:
+    states = witness_mod.list_states(args.state_dir)
+    print(witness_mod.render_states(states, args.state_dir))
+    return 0
+
+
+# ── anchor ───────────────────────────────────────────────────────────────────
+
+def cmd_anchor_push(args) -> int:
+    report = anchor_mod.push(
+        repo_path=Path.cwd(),
+        remote=args.remote,
+        ref=args.ref,
+        checkpoint_path=args.checkpoint,
+        origin=args.origin,
+    )
+    print(anchor_mod.render_report(report, "ANCHOR PUSH"))
+    return 0 if report["ok"] else 1
+
+
+def cmd_anchor_verify(args) -> int:
+    report = anchor_mod.verify(
+        repo_path=Path.cwd(),
+        remote=args.remote,
+        ref=args.ref,
+        origin=args.origin,
+        max_age_days=args.max_age_days,
+    )
+    print(anchor_mod.render_report(report, "ANCHOR VERIFY"))
+    return 0 if report["ok"] else 1
+
+
 # ── verify-pr ────────────────────────────────────────────────────────────────
 
 def cmd_verify_pr(args) -> int:
@@ -579,6 +700,11 @@ def cmd_verify_pr(args) -> int:
             min_tier=args.min_tier,
             ci_hmac_key_file=args.ci_hmac_key_file,
             ci_attestations_dir=args.ci_attestations_dir,
+            witness_keys=args.witness_keys,
+            require_witnesses=args.require_witnesses,
+            checkpoint_path=args.checkpoint,
+            anchors_remote=args.anchors_remote,
+            anchors_ref=args.anchors_ref,
         )
     except ValueError as e:
         print(f"Error: {e}", file=sys.stderr)
@@ -640,6 +766,9 @@ def build_parser() -> argparse.ArgumentParser:
             "  verify-pr       Verify provenance for all commits in a PR range.\n"
             "  ci-issue        Issue a CI attestation (DSSE) after verifying evidence.\n"
             "  ci-verify       Verify a CI-issued DSSE attestation for a commit.\n"
+            "  checkpoint      Emit / verify signed ledger checkpoints (witnessable).\n"
+            "  witness         Independent witness: cosign checkpoints, refuse forks.\n"
+            "  anchor          Anchor checkpoints on an external git remote.\n"
             "  blame           Line-level attribution for a file (best-effort).\n"
             "  mcp             Run the provenance MCP server over stdio.\n"
         ),
@@ -898,11 +1027,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     vpr_p.add_argument(
         "--min-tier",
-        choices=list(envelope_mod.TIER_ORDER[:3]),
+        choices=list(envelope_mod.TIER_ORDER),
         default=envelope_mod.TIER_SELF_RECORDED,
         help="Minimum assurance tier every commit must reach "
              "(default: self-recorded — current behaviour). ci-verified "
-             "requires a valid CI-issued DSSE attestation per commit.",
+             "requires a valid CI-issued DSSE attestation per commit; "
+             "independently-witnessed additionally requires the commit's "
+             "ledger leaf to be covered by a witnessed checkpoint "
+             "(--witness-keys plus --checkpoint or --anchors-remote).",
     )
     vpr_p.add_argument(
         "--ci-hmac-key-file",
@@ -915,6 +1047,38 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="DIR",
         help="Directory of CI-issued DSSE envelopes to search when a "
              "commit has no refs/notes/sao-ci discovery note.",
+    )
+    vpr_p.add_argument(
+        "--witness-keys",
+        metavar="FILE",
+        help="Pinned witness keys file (one witness per line) for "
+             "verifying checkpoint cosignatures.",
+    )
+    vpr_p.add_argument(
+        "--require-witnesses",
+        type=int,
+        default=1,
+        metavar="N",
+        help="Cosignatures required from the pinned witness set for the "
+             "independently-witnessed tier (default: 1).",
+    )
+    vpr_p.add_argument(
+        "--checkpoint",
+        metavar="PATH",
+        help="Witnessed checkpoint file covering the commits' ledger "
+             "leaves.",
+    )
+    vpr_p.add_argument(
+        "--anchors-remote",
+        metavar="URL",
+        help="External anchor remote: use its newest anchored checkpoint "
+             "instead of --checkpoint.",
+    )
+    vpr_p.add_argument(
+        "--anchors-ref",
+        metavar="REF",
+        help="Anchor ref on --anchors-remote (default: "
+             "refs/sao/anchors/<origin-slug>).",
     )
     vpr_p.set_defaults(func=cmd_verify_pr)
 
@@ -1002,6 +1166,276 @@ def build_parser() -> argparse.ArgumentParser:
         help="Identity to match in the allowed-signers file (default: sao).",
     )
     ci_verify_p.set_defaults(func=cmd_ci_verify)
+
+    # ── checkpoint ────────────────────────────────────────────────────────────
+    ckpt_p = sub.add_parser(
+        "checkpoint",
+        help="Signed ledger checkpoints for independent witnessing.",
+        description=(
+            "Emit and verify signed checkpoints of the transparency ledger\n"
+            "(origin + tree size + Merkle root). Witnesses cosign\n"
+            "checkpoints (sao witness); clients requiring N pinned\n"
+            "cosignatures make ledger equivocation need colluding witnesses."
+        ),
+    )
+    ckpt_sub = ckpt_p.add_subparsers(dest="checkpoint_command", required=True)
+
+    ckpt_emit_p = ckpt_sub.add_parser(
+        "emit",
+        help="Emit a signed checkpoint of the current ledger.",
+        description=(
+            "Write a sao-checkpoint/1 document for the current ledger,\n"
+            "signed by the repo operator. Verifiers and witnesses need\n"
+            "ledger access (this repo or a clone); for witnesses without a\n"
+            "clone, embed a consistency proof with --bundle-proof-from\n"
+            "set to the tree size the witness last saw."
+        ),
+    )
+    ckpt_emit_p.add_argument(
+        "--out",
+        metavar="PATH",
+        help="Checkpoint output path (default: blackbox/checkpoint.json).",
+    )
+    ckpt_emit_p.add_argument(
+        "--signer",
+        choices=["none", "ssh", "hmac"],
+        default="none",
+        help="Operator signer. 'none' emits an UNSIGNED checkpoint "
+             "(loudly marked as such).",
+    )
+    ckpt_emit_p.add_argument(
+        "--key-file",
+        metavar="PATH",
+        help="Signing key file (hmac: default $SAO_CI_HMAC_KEY_FILE; "
+             "ssh: default $SAO_SIGNING_KEY_FILE).",
+    )
+    ckpt_emit_p.add_argument(
+        "--origin",
+        help="Stable ledger identity string (default: origin remote URL, "
+             "falling back to the repo directory name).",
+    )
+    ckpt_emit_p.add_argument(
+        "--bundle-proof-from",
+        type=int,
+        metavar="SIZE",
+        help="Embed a consistency proof from this older tree size, for "
+             "witnesses without their own ledger clone.",
+    )
+    ckpt_emit_p.set_defaults(func=cmd_checkpoint_emit)
+
+    ckpt_verify_p = ckpt_sub.add_parser(
+        "verify",
+        help="Verify a checkpoint (signature, ledger root, cosignatures).",
+        description=(
+            "Verify the operator signature, that the checkpoint root\n"
+            "matches this repo's ledger at that size (and is append-only\n"
+            "consistent with the current ledger), and that at least\n"
+            "--require-witnesses cosignatures verify against the pinned\n"
+            "--witness-keys file (one witness per line:\n"
+            "'<name> ssh-ed25519 <key>' allowed-signers style, or\n"
+            "'<name> hmac-sha256 <key>' for a shared-secret witness)."
+        ),
+    )
+    ckpt_verify_p.add_argument(
+        "--checkpoint", required=True, metavar="PATH",
+        help="Checkpoint file to verify.",
+    )
+    ckpt_verify_p.add_argument(
+        "--require-witnesses",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Minimum valid cosignatures from the pinned witness set "
+             "(default: 0 — no quorum enforced).",
+    )
+    ckpt_verify_p.add_argument(
+        "--witness-keys",
+        metavar="FILE",
+        help="Pinned witness keys file (one witness per line).",
+    )
+    ckpt_verify_p.add_argument(
+        "--hmac-key-file",
+        metavar="PATH",
+        help="HMAC key file to verify an hmac operator signature.",
+    )
+    ckpt_verify_p.add_argument(
+        "--allowed-signers",
+        metavar="PATH",
+        help="ssh allowed-signers file to verify an ssh operator signature.",
+    )
+    ckpt_verify_p.add_argument(
+        "--signer-identity",
+        default="sao",
+        help="Identity to match in the operator allowed-signers file "
+             "(default: sao).",
+    )
+    ckpt_verify_p.set_defaults(func=cmd_checkpoint_verify)
+
+    # ── witness ───────────────────────────────────────────────────────────────
+    witness_p = sub.add_parser(
+        "witness",
+        help="Independent checkpoint witness (cosign / state).",
+        description=(
+            "A stateful, independent cosigner for ledger checkpoints.\n"
+            "RUN IT OUTSIDE THE ATTESTED REPO — a different machine, repo,\n"
+            "and CI, with its own key and state the repo operator cannot\n"
+            "write to (see templates/sao-witness.yml). The witness\n"
+            "remembers the last checkpoint per origin, verifies\n"
+            "append-only growth, and REFUSES forks, rollbacks, and\n"
+            "same-size root swaps without updating its state."
+        ),
+    )
+    witness_sub = witness_p.add_subparsers(dest="witness_command", required=True)
+
+    witness_cosign_p = witness_sub.add_parser(
+        "cosign",
+        help="Verify a checkpoint against remembered state and cosign it.",
+        description=(
+            "First encounter with an origin is trust-on-first-use (logged\n"
+            "loudly). Afterwards the checkpoint must extend the remembered\n"
+            "one: same origin, tree size not shrinking, and a verifying\n"
+            "consistency proof — from the witness's own ledger clone\n"
+            "(--ledger-repo) or the checkpoint's bundled proof. Any\n"
+            "failure is a REFUSAL (exit 1, state untouched)."
+        ),
+    )
+    witness_cosign_p.add_argument(
+        "--checkpoint", required=True, metavar="PATH",
+        help="Checkpoint file to verify and cosign (updated in place).",
+    )
+    witness_cosign_p.add_argument(
+        "--state-dir", required=True, metavar="DIR",
+        help="Directory holding this witness's per-origin state files.",
+    )
+    witness_cosign_p.add_argument(
+        "--name", required=True,
+        help="Witness name — must match the name pinned in verifiers' "
+             "witness-keys files.",
+    )
+    witness_cosign_p.add_argument(
+        "--signer",
+        choices=["ssh", "hmac"],
+        required=True,
+        help="Cosignature signer ('none' is not allowed for witnesses).",
+    )
+    witness_cosign_p.add_argument(
+        "--key-file",
+        metavar="PATH",
+        help="Witness signing key file (hmac: default $SAO_CI_HMAC_KEY_FILE; "
+             "ssh: default $SAO_SIGNING_KEY_FILE). Keep it OUT of the "
+             "attested repo's trust domain.",
+    )
+    witness_cosign_p.add_argument(
+        "--ledger-repo",
+        metavar="PATH",
+        help="Path to the witness's own clone of the attested repo, used "
+             "to verify consistency proofs (otherwise the checkpoint must "
+             "bundle a proof from the remembered size).",
+    )
+    witness_cosign_p.add_argument(
+        "--operator-hmac-key-file",
+        metavar="PATH",
+        help="Pinned operator HMAC key to verify the checkpoint's "
+             "operator signature before cosigning.",
+    )
+    witness_cosign_p.add_argument(
+        "--operator-allowed-signers",
+        metavar="PATH",
+        help="Pinned operator allowed-signers file to verify an ssh "
+             "operator signature before cosigning.",
+    )
+    witness_cosign_p.set_defaults(func=cmd_witness_cosign)
+
+    witness_state_p = witness_sub.add_parser(
+        "state",
+        help="Print the witness's remembered origins (sizes + roots).",
+        description="List every origin in --state-dir with its last "
+                    "cosigned tree size and root.",
+    )
+    witness_state_p.add_argument(
+        "--state-dir", required=True, metavar="DIR",
+        help="Directory holding this witness's per-origin state files.",
+    )
+    witness_state_p.set_defaults(func=cmd_witness_state)
+
+    # ── anchor ────────────────────────────────────────────────────────────────
+    anchor_p = sub.add_parser(
+        "anchor",
+        help="Anchor checkpoints on an external git remote.",
+        description=(
+            "Publish checkpoints as an append-only commit chain on a ref\n"
+            "in an EXTERNAL repository (refs/sao/anchors/<origin-slug>),\n"
+            "so ledger history cannot be rewritten without the anchor\n"
+            "chain telling on it. Use a remote the attested repo's\n"
+            "operator and agents cannot force-push."
+        ),
+    )
+    anchor_sub = anchor_p.add_subparsers(dest="anchor_command", required=True)
+
+    anchor_push_p = anchor_sub.add_parser(
+        "push",
+        help="Append the current (optionally witnessed) checkpoint.",
+        description=(
+            "Append a checkpoint as a new anchor commit whose parent is\n"
+            "the previous anchor. Refuses to anchor a checkpoint that does\n"
+            "not strictly grow past the anchored tip, and pushes plain\n"
+            "fast-forward — a rewritten anchor ref makes the push fail."
+        ),
+    )
+    anchor_push_p.add_argument(
+        "--remote", required=True,
+        help="External anchor repository (URL or path).",
+    )
+    anchor_push_p.add_argument(
+        "--ref",
+        metavar="REF",
+        help="Anchor ref (default: refs/sao/anchors/<origin-slug>).",
+    )
+    anchor_push_p.add_argument(
+        "--checkpoint",
+        metavar="PATH",
+        help="Checkpoint file to anchor (default: build an unsigned "
+             "checkpoint of the current ledger).",
+    )
+    anchor_push_p.add_argument(
+        "--origin",
+        help="Ledger identity when building the default checkpoint "
+             "(default: origin remote URL / repo directory name).",
+    )
+    anchor_push_p.set_defaults(func=cmd_anchor_push)
+
+    anchor_verify_p = anchor_sub.add_parser(
+        "verify",
+        help="Verify the anchor chain against the local ledger.",
+        description=(
+            "Fetch the anchor chain and check linearity (strictly\n"
+            "increasing tree sizes, one origin), consistency of every\n"
+            "anchored root with the local ledger, and (with\n"
+            "--max-age-days) freshness of the newest anchor. Checkpoint\n"
+            "timestamps are operator claims unless witnessed."
+        ),
+    )
+    anchor_verify_p.add_argument(
+        "--remote", required=True,
+        help="External anchor repository (URL or path).",
+    )
+    anchor_verify_p.add_argument(
+        "--ref",
+        metavar="REF",
+        help="Anchor ref (default: refs/sao/anchors/<origin-slug>).",
+    )
+    anchor_verify_p.add_argument(
+        "--origin",
+        help="Ledger identity used to derive the default ref.",
+    )
+    anchor_verify_p.add_argument(
+        "--max-age-days",
+        type=float,
+        metavar="N",
+        help="Fail when the newest anchor's checkpoint timestamp is older "
+             "than N days.",
+    )
+    anchor_verify_p.set_defaults(func=cmd_anchor_verify)
 
     # ── blame ─────────────────────────────────────────────────────────────────
     blame_p = sub.add_parser(

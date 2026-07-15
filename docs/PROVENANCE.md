@@ -27,6 +27,8 @@ Five pieces work together:
 | Flight plans | `sao flight-plan` | The mission declared its scope *before* running; drift is detectable |
 | PR gate | `sao verify-pr` | Every commit in a PR is checked for consistent, untampered declared provenance (tier-aware: `--min-tier`) |
 | CI issuance | `sao ci-issue` / `sao ci-verify` | A trusted CI job verifies the evidence, recomputes git reality, applies policy, and issues the final DSSE attestation (`ci-verified` tier) |
+| Checkpoints + witnesses | `sao checkpoint` / `sao witness` | Signed ledger roots, cosigned by independent stateful witnesses that refuse forks and rollbacks (`independently-witnessed` tier) |
+| External anchoring | `sao anchor push` / `sao anchor verify` | Checkpoints published as an append-only commit chain in an external repo, with freshness bounds |
 | Line provenance | `sao blame` | A derived, best-effort view mapping surviving lines to missions (see caveats below) |
 
 Plus a live-agent interface: `sao mcp` exposes all of it over the Model
@@ -295,6 +297,132 @@ What the tier does and does not add is stated precisely in
 [docs/THREAT_MODEL.md](THREAT_MODEL.md#graduated-assurance-tiers): it
 closes workstation-side forgery of the **final claim**; it does **not**
 make the locally recorded evidence truthful.
+
+## Independent witnessing — the `independently-witnessed` tier
+
+A Merkle tree proves append-only-ness only **relative to a previously
+trusted root**. Everything above still leaves one gap: the operator can
+show *different verifiers different ledgers* (split view), regenerate
+the log from scratch (fork), or serve an old log (rollback/freshness) —
+consistency proofs cannot catch what no one remembers. Witnesses supply
+the memory. This is the Certificate Transparency / Go-sumdb witness
+pattern, stdlib-only:
+
+1. **Checkpoint** (`sao checkpoint emit`) — the operator signs a small
+   statement of the current ledger: `{origin, tree_size, root_hash,
+   timestamp}` (`sao-checkpoint/1`, ssh/hmac signers from envelope.py;
+   `--signer none` is allowed but the document is loudly marked
+   unsigned). The signed body is only those five fields, so witness
+   cosignatures append without invalidating the operator signature or
+   each other. Operator and cosignature signing use PAE-style domain
+   separation (contexts `sao-checkpoint/1` / `sao-witness-cosign/1`,
+   with the witness name bound into its own signed message).
+2. **Witness** (`sao witness cosign`) — an independent, *stateful*
+   cosigner that runs **outside the attested repo** (different machine,
+   repo, CI, key, and state storage). Per origin it remembers the last
+   checkpoint it cosigned; a new checkpoint must be the same origin,
+   must not shrink, and must carry a verifying consistency proof from
+   the remembered `(size, root)` to the new one — computed from the
+   witness's own read-only clone (`--ledger-repo`) or from a proof the
+   operator bundled into the checkpoint (`sao checkpoint emit
+   --bundle-proof-from <size>`). Anything else — rollback, same-size
+   root swap, unprovable growth — is a loud REFUSAL (non-zero exit,
+   "possible equivocation/fork") and the state does **not** advance.
+   The *first* checkpoint per origin is trust-on-first-use, clearly
+   logged: the witness attests to append-only-ness from that point on.
+3. **Client** (`sao checkpoint verify --require-witnesses N
+   --witness-keys FILE`) — verifies the operator signature, that the
+   root matches the local ledger at that size (and is consistent with
+   the current ledger), and that ≥ N cosignatures verify against a
+   *pinned* witness key file (one witness per line: `<name> ssh-ed25519
+   <key>` allowed-signers style, or `<name> hmac-sha256 <key>` for a
+   shared-secret witness — symmetric, so suitable only when verifier
+   and witness are the same trusted control plane).
+
+```
+ ATTESTED REPO (operator)          WITNESS 1..N (independent)      CLIENT
+ ────────────────────────          ──────────────────────────      ──────
+ ledger grows (sao attest)         state: last (size, root)
+   │                                     per origin
+ sao checkpoint emit               ┌──────────────────────────┐
+   {origin, size, root, ts}  ────▶ │ sao witness cosign       │
+   signed by operator              │  same origin?            │
+   [--bundle-proof-from M]         │  size >= remembered?     │
+   │                               │  consistency proof from  │
+   │                               │  remembered (M, root_M)  │
+   │                               │  to (N, root_N) verifies?│
+   │                               │   — via own clone or     │
+   │                               │     bundled proof        │
+   │                               │  NO → REFUSE, keep state │
+   │                               │  YES → cosign + advance  │
+   │                               └───────────┬──────────────┘
+   │                                           │ cosignature appended
+   ▼                                           ▼
+ sao anchor push ─────────▶ external repo   sao checkpoint verify
+ (append-only anchor        refs/sao/         --require-witnesses N
+  commit chain)             anchors/<slug>    --witness-keys pinned
+                                            sao verify-pr --min-tier
+                                              independently-witnessed
+```
+
+**Anchoring** (`sao anchor push --remote URL [--ref refs/sao/anchors/…]`)
+additionally publishes checkpoints as a commit chain on a ref in an
+**external** repository — each anchor commit's parent is the previous
+anchor, so the external repo's own history is an append-only record.
+Pushes are plain fast-forwards that refuse to anchor a checkpoint whose
+tree size does not strictly grow. `sao anchor verify --remote URL
+[--max-age-days N]` fetches the chain and checks linearity (one origin,
+strictly increasing sizes), consistency of every anchored root with the
+local ledger, and freshness of the newest anchor. Checkpoint timestamps
+are **operator claims unless the checkpoint is witnessed**, and an
+anchor bounds staleness only as tightly as the anchoring cadence.
+
+**PR gate**: `sao verify-pr --min-tier independently-witnessed
+--witness-keys FILE --require-witnesses N (--checkpoint PATH |
+--anchors-remote URL)` — a commit reaches the top tier when it is
+`ci-verified` **and** its ledger leaf is covered by a witnessed
+checkpoint: `tree_size > leaf_index`, root verifies against the ledger,
+≥ N valid cosignatures from the pinned set.
+
+Demo (two shells: the repo, and a "witness machine" directory):
+
+```bash
+# repo: attest a mission, then emit an operator-signed checkpoint
+sao run --name "add greeter" --attest --command '…'
+sao checkpoint emit --signer ssh --key-file ~/.ssh/sao_operator \
+  --out blackbox/checkpoint.json
+
+# witness (OUTSIDE the repo; first run is trust-on-first-use):
+sao witness cosign --checkpoint /path/to/blackbox/checkpoint.json \
+  --state-dir ~/witness-state --name alice --signer ssh \
+  --key-file ~/.ssh/alice_witness --ledger-repo /path/to/readonly-clone
+sao witness state --state-dir ~/witness-state
+
+# repo: pin the witness and enforce the quorum + the tier
+printf '%s\n' "alice $(cat ~/.ssh/alice_witness.pub)" > witnesses.txt
+sao checkpoint verify --checkpoint blackbox/checkpoint.json \
+  --require-witnesses 1 --witness-keys witnesses.txt
+sao anchor push --remote git@elsewhere:anchors.git \
+  --checkpoint blackbox/checkpoint.json
+sao anchor verify --remote git@elsewhere:anchors.git --max-age-days 7
+sao verify-pr --base origin/main --head HEAD \
+  --min-tier independently-witnessed \
+  --witness-keys witnesses.txt --require-witnesses 1 \
+  --checkpoint blackbox/checkpoint.json
+
+# negative path: hand the witness a same-size checkpoint with a
+# different root (or a smaller one) — it exits 1 with
+# "REFUSED — possible equivocation/fork" and its state does not move.
+```
+
+A scheduled witness workflow for a **separate witness repo** ships at
+[`templates/sao-witness.yml`](../templates/sao-witness.yml); its
+comments spell out the independence requirements (different repo and
+maintainers, witness key never in the target repo, refusals are
+incidents). What this tier does and does not buy — including the TOFU
+bootstrap and the "witnesses don't make local evidence truthful"
+caveat — is stated in
+[docs/THREAT_MODEL.md](THREAT_MODEL.md#graduated-assurance-tiers).
 
 ## Line-level provenance: `sao blame`
 

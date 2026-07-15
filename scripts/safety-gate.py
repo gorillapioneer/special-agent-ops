@@ -90,6 +90,7 @@ ALLOWED_INTERNAL_PATHS = {
     ".github/workflows/tests.yml",
     "templates/verify-pr.yml",
     "templates/sao-provenance-issuer.yml",
+    "templates/sao-witness.yml",
 }
 
 WARN_CONTENT_PATTERNS = [
