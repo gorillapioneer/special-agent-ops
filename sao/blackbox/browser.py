@@ -14,6 +14,7 @@ import webbrowser
 import zipfile
 from pathlib import Path
 
+from .compressor import ArchiveSecurityError, validate_archive_members
 from .seal import sha256_file, sha256_directory
 
 
@@ -155,9 +156,14 @@ def extract_archive_to_temp(archive_path: Path) -> Path:
     The returned directory is a Path inside a tempfile.mkdtemp() directory.
     Use find_session_dir_in_extracted_archive() to locate the session folder
     inside it.  Lifetime management is the caller's responsibility.
+
+    Entries are validated first (see compressor.validate_archive_members):
+    traversal names, duplicates, symlinks, and archive bombs raise
+    ArchiveSecurityError before anything is written to disk.
     """
     tmp = Path(tempfile.mkdtemp(prefix="sao_verify_"))
     with zipfile.ZipFile(archive_path, "r") as zf:
+        validate_archive_members(zf)
         zf.extractall(tmp)
     return tmp
 
@@ -243,9 +249,12 @@ def verify_archive_file(archive_path: Path) -> dict:
     seal = _find_seal_for_archive(archive_path)
     mission_id = seal.get("mission_id", archive_path.stem)
 
-    # Extract the archive, verify hashes, then let the context manager clean up.
+    # Extract the archive, verify hashes, then let the context manager clean
+    # up.  Entries are validated first: traversal names, duplicates,
+    # symlinks, and archive bombs raise ArchiveSecurityError cleanly.
     with tempfile.TemporaryDirectory(prefix="sao_verify_") as tmp:
         with zipfile.ZipFile(archive_path, "r") as zf:
+            validate_archive_members(zf)
             zf.extractall(tmp)
         session_dir = find_session_dir_in_extracted_archive(Path(tmp))
 
