@@ -72,6 +72,113 @@ def recorded_mission(tmp_path_factory: pytest.TempPathFactory) -> dict:
     return result
 
 
+# ── Provenance fixtures ───────────────────────────────────────────────────────
+
+def commit_mission_script(filename: str, text: str, message: str) -> str:
+    """Python -c script for a mission that writes *filename* and commits it."""
+    return (
+        "import pathlib, subprocess; "
+        f"p = pathlib.Path({filename!r}); "
+        "p.parent.mkdir(parents=True, exist_ok=True); "
+        f"p.write_text({text!r}, encoding='utf-8'); "
+        f"subprocess.run(['git', 'add', {filename!r}], check=True); "
+        "subprocess.run(['git', '-c', 'user.name=Agent', "
+        "'-c', 'user.email=agent@example.com', 'commit', '-q', '-m', "
+        f"{message!r}], check=True)"
+    )
+
+
+def record_committing_mission(
+    repo: Path,
+    name: str,
+    filename: str,
+    text: str,
+    attest: bool = True,
+) -> dict:
+    """Record a mission (argv mode) that writes one file and commits it."""
+    from sao.blackbox import recorder
+
+    script = commit_mission_script(filename, text, f"feat: {name}")
+    return recorder.record_mission_argv(
+        name=name,
+        command_argv=[sys.executable, "-c", script],
+        repo_path=repo,
+        attest=attest,
+    )
+
+
+def human_commit(repo: Path, filename: str, text: str, message: str) -> str:
+    """Make a plain (unattested) commit; return its sha."""
+    path = repo / filename
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    env_args = ["-c", "user.name=Human", "-c", "user.email=human@example.com"]
+    subprocess.run(["git", "-C", str(repo), "add", filename], check=True)
+    subprocess.run(
+        ["git", *env_args, "-C", str(repo), "commit", "-q", "-m", message],
+        check=True,
+    )
+    out = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"],
+        check=True, capture_output=True, text=True,
+    )
+    return out.stdout.strip()
+
+
+@pytest.fixture(scope="session")
+def provenance_repo(tmp_path_factory: pytest.TempPathFactory) -> dict:
+    """A repo with two attested agent missions and one human commit.
+
+    Mission A runs under a flight plan scoped to src/*; mission B has no
+    flight plan.  Session-scoped: treat as READ-ONLY (tamper tests must use
+    copy_provenance_repo).
+    """
+    pytest.importorskip("qrcode", reason="qrcode[pil] required to record missions")
+    from sao.provenance import flightplan
+
+    repo = tmp_path_factory.mktemp("provenance_repo")
+    init_git_repo(repo)
+    base_commit = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"],
+        check=True, capture_output=True, text=True,
+    ).stdout.strip()
+
+    flightplan.file_flight_plan(
+        repo, name="mission a", intent="add alpha module", scope=["src/*"]
+    )
+    mission_a = record_committing_mission(
+        repo, "mission a", "src/alpha.py", "ALPHA = 1\nBETA = 2\n"
+    )
+    mission_b = record_committing_mission(
+        repo, "mission b", "src/beta.py", "def beta():\n    return 'b'\n"
+    )
+    human_sha = human_commit(
+        repo, "docs/notes.txt", "written by a human\n", "docs: add notes"
+    )
+
+    return {
+        "repo": repo,
+        "base_commit": base_commit,
+        "mission_a": mission_a,
+        "mission_b": mission_b,
+        "human_commit": human_sha,
+    }
+
+
+@pytest.fixture
+def copy_provenance_repo(provenance_repo: dict, tmp_path: Path):
+    """Copy the shared provenance repo (including .git) for tamper tests."""
+
+    def _copy() -> dict:
+        dest = tmp_path / "repo"
+        shutil.copytree(provenance_repo["repo"], dest)
+        copied = dict(provenance_repo)
+        copied["repo"] = dest
+        return copied
+
+    return _copy
+
+
 @pytest.fixture
 def copy_mission(recorded_mission: dict, tmp_path: Path):
     """Copy the shared recorded mission into tmp_path for mutation tests.
