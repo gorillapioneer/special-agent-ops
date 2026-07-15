@@ -154,13 +154,14 @@ def collect_git_objects(repo_path: Path, head_before, head_after):
     }
 
 
-def attach_git_note(repo_path: Path, commit: str, note_text: str) -> bool:
-    """Attach *note_text* to *commit* under refs/notes/sao (force-replace).
+def attach_git_note(repo_path: Path, commit: str, note_text: str, ref: str = NOTES_REF) -> bool:
+    """Attach *note_text* to *commit* under *ref* (default refs/notes/sao,
+    force-replace).
 
     Returns True on success.  Falls back to an explicit committer identity
     when the repo has none configured.
     """
-    args = ["notes", f"--ref={NOTES_REF}", "add", "-f", "-m", note_text, commit]
+    args = ["notes", f"--ref={ref}", "add", "-f", "-m", note_text, commit]
     proc = _git(args, cwd=repo_path)
     if proc.returncode == 0:
         return True
@@ -172,9 +173,9 @@ def attach_git_note(repo_path: Path, commit: str, note_text: str) -> bool:
     return _git(fallback, cwd=repo_path).returncode == 0
 
 
-def read_git_note(repo_path: Path, commit: str):
-    """Return the parsed attestation note on *commit*, or None."""
-    proc = _git(["notes", f"--ref={NOTES_REF}", "show", commit], cwd=repo_path)
+def read_git_note(repo_path: Path, commit: str, ref: str = NOTES_REF):
+    """Return the parsed attestation note on *commit* under *ref*, or None."""
+    proc = _git(["notes", f"--ref={ref}", "show", commit], cwd=repo_path)
     if proc.returncode != 0:
         return None
     text = proc.stdout.strip()
