@@ -13,6 +13,11 @@ dependencies = [
     "qrcode[pil]",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=7",
+]
+
 [project.scripts]
 # After `pip install -e .` you can use `sao run ...` directly.
 sao = "sao.cli:main"
@@ -20,3 +25,7 @@ sao = "sao.cli:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["sao*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
