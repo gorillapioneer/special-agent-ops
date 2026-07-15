@@ -9,9 +9,16 @@ Commands:
     sao list
     sao show <mission_id>
     sao verify <mission_id>
+    sao flight-plan --name "..." --intent "..." --scope "sao/**"
+    sao attest <mission_id>
+    sao ledger root | sao ledger verify
+    sao verify-pr --base main --head HEAD
+    sao blame <file>
+    sao mcp
 """
 
 import argparse
+import json
 import sys
 import webbrowser
 from pathlib import Path
@@ -22,6 +29,14 @@ from sao.blackbox import (
     dashboard as dashboard_mod,
     maproom as maproom_mod,
     pr_report as pr_report_mod,
+)
+from sao.provenance import (
+    attest as attest_mod,
+    blame as blame_mod,
+    flightplan as flightplan_mod,
+    ledger as ledger_mod,
+    mcp_server as mcp_mod,
+    verify_pr as verify_pr_mod,
 )
 
 
@@ -37,6 +52,7 @@ def cmd_run(args) -> int:
         name=args.name,
         command=args.command,
         repo_path=Path.cwd(),
+        attest=args.attest,
     )
 
     _print_banner(result)
@@ -66,6 +82,7 @@ def cmd_wrap(args) -> int:
         name=args.name,
         command_argv=command_argv,
         repo_path=Path.cwd(),
+        attest=args.attest,
     )
 
     _print_banner(result)
@@ -101,6 +118,17 @@ def _print_banner(result: dict) -> None:
     print(f"  HTML Card:       {result.get('html_card_path', 'n/a')}")
     print(f"  QR Payload:      {result.get('qr_payload_json_path', 'n/a')}")
     print(f"  QR Image:        {result.get('qr_image_path', 'n/a')}")
+    if result.get("flightplan_consumed"):
+        print(f"  Flight Plan:     consumed into session (flightplan.json)")
+    attestation = result.get("attestation")
+    if attestation:
+        ledger_pos = attestation["statement"]["ledger"]
+        print(f"  Attestation:     {attestation['provenance_path']}")
+        print(f"  Ledger Leaf:     #{ledger_pos['leaf_index']} (tree size {ledger_pos['tree_size']})")
+        if attestation.get("note_attached"):
+            print(f"  Git Note:        refs/notes/sao -> {attestation['note_commit'][:10]}")
+        else:
+            print(f"  Git Note:        not attached (no new commit)")
     print(bar)
     print()
 
@@ -376,6 +404,180 @@ def cmd_verify_archive(args) -> int:
     return 0 if result["verified"] else 1
 
 
+# ── flight-plan ──────────────────────────────────────────────────────────────
+
+def cmd_flight_plan(args) -> int:
+    try:
+        path = flightplan_mod.file_flight_plan(
+            repo_path=Path.cwd(),
+            name=args.name,
+            intent=args.intent,
+            scope=args.scope,
+        )
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 2
+
+    width = 64
+    bar = "=" * width
+    print()
+    print(bar)
+    print("  SPECIAL AGENT OPS — FLIGHT PLAN FILED")
+    print(bar)
+    print(f"  Name:    {args.name}")
+    print(f"  Intent:  {args.intent}")
+    for g in args.scope:
+        print(f"  Scope:   {g}")
+    print(f"  Pending: {path}")
+    print(bar)
+    print("  The next recorded mission will consume this plan.")
+    print(bar)
+    print()
+    return 0
+
+
+# ── attest ───────────────────────────────────────────────────────────────────
+
+def cmd_attest(args) -> int:
+    sessions_root = browser.get_sessions_root(Path.cwd())
+    try:
+        session_dir = browser.find_mission(sessions_root, args.mission_id)
+    except FileNotFoundError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+    try:
+        result = attest_mod.attest_session(Path.cwd(), session_dir)
+    except (FileNotFoundError, KeyError, ValueError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+    statement = result["statement"]
+    width = 64
+    bar = "=" * width
+    print()
+    print(bar)
+    print("  SPECIAL AGENT OPS — ATTESTATION")
+    print(bar)
+    print(f"  Mission ID:      {statement['mission_id']}")
+    print(f"  Attestation:     {result['provenance_path']}")
+    print(f"  Statement SHA:   {result['attestation_sha256'][:16]}...")
+    print(f"  Ledger Leaf:     #{statement['ledger']['leaf_index']} "
+          f"(tree size {statement['ledger']['tree_size']})")
+    print(f"  Ledger Root:     {statement['ledger']['root'][:16]}...")
+    parent = statement.get("parent_attestation_sha256")
+    print(f"  Parent:          {parent[:16] + '...' if parent else '(chain start)'}")
+    if result["note_attached"]:
+        print(f"  Git Note:        refs/notes/sao -> {result['note_commit'][:10]}")
+    else:
+        print(f"  Git Note:        not attached (mission did not end on a new commit)")
+    if result["signature_path"]:
+        print(f"  Signature:       {result['signature_path']}")
+    print(bar)
+    print()
+    return 0
+
+
+# ── ledger ───────────────────────────────────────────────────────────────────
+
+def cmd_ledger_root(args) -> int:
+    ledger = ledger_mod.Ledger(Path.cwd())
+    root_info = ledger.root()
+    print(json.dumps(root_info, indent=2))
+
+    if args.qr:
+        payload = ledger_mod.build_root_qr_payload(root_info)
+        try:
+            from sao.blackbox import qr_image as qr_image_mod
+
+            qr_path = qr_image_mod.generate_qr_png(payload, Path(args.qr))
+            print(f"QR image written: {qr_path}", file=sys.stderr)
+        except RuntimeError as e:
+            print(f"QR image skipped: {e}", file=sys.stderr)
+    return 0
+
+
+def cmd_ledger_verify(args) -> int:
+    ledger = ledger_mod.Ledger(Path.cwd())
+    result = ledger.verify_log()
+
+    width = 64
+    bar = "=" * width
+    print()
+    print(bar)
+    print("  SPECIAL AGENT OPS — LEDGER VERIFY")
+    print(bar)
+    print(f"  Ledger:     {ledger.path}")
+    print(f"  Tree Size:  {result['tree_size']}")
+    print(f"  Root Hash:  {result['root_hash']}")
+    print(bar)
+    for entry in result["entries"]:
+        leaf_state = (
+            "leaf recomputed OK" if entry["leaf_ok"]
+            else "LEAF MISMATCH" if entry["leaf_recomputed"]
+            else "session gone (leaf kept)"
+        )
+        inc_state = "inclusion OK" if entry["inclusion_ok"] else "INCLUSION FAILED"
+        print(f"  #{entry['index']}  {entry['mission_id']}")
+        print(f"      {leaf_state}; {inc_state}")
+    print(bar)
+    if result["ok"]:
+        print("  Result: VERIFIED")
+    else:
+        print("  Result: FAILED")
+        for problem in result["problems"]:
+            print(f"  - {problem}")
+    print(bar)
+    print()
+    return 0 if result["ok"] else 1
+
+
+# ── verify-pr ────────────────────────────────────────────────────────────────
+
+def cmd_verify_pr(args) -> int:
+    try:
+        report = verify_pr_mod.verify_pr(
+            repo_path=Path.cwd(),
+            base=args.base,
+            head=args.head,
+            require_attestation=args.require_attestation,
+            strict_scope=args.strict_scope,
+        )
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+    print(verify_pr_mod.render_text(report))
+    if args.markdown:
+        md_path = Path(args.markdown)
+        md_path.parent.mkdir(parents=True, exist_ok=True)
+        md_path.write_text(verify_pr_mod.render_markdown(report), encoding="utf-8")
+        print(f"Markdown report: {md_path}")
+    return 0 if report["ok"] else 1
+
+
+# ── blame ────────────────────────────────────────────────────────────────────
+
+def cmd_blame(args) -> int:
+    try:
+        result = blame_mod.blame_file(Path.cwd(), args.file)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+    if args.json:
+        print(json.dumps(result, indent=2))
+    else:
+        print(blame_mod.render_text(result))
+    return 0
+
+
+# ── mcp ──────────────────────────────────────────────────────────────────────
+
+def cmd_mcp(args) -> int:
+    return mcp_mod.serve(repo_path=Path.cwd())
+
+
 # ── Parser ────────────────────────────────────────────────────────────────────
 
 def build_parser() -> argparse.ArgumentParser:
@@ -395,6 +597,12 @@ def build_parser() -> argparse.ArgumentParser:
             "  pr-report       Print a GitHub PR-ready mission report.\n"
             "  verify          Verify SHA256 seals for a mission session.\n"
             "  verify-archive  Verify a mission .zip archive directly.\n"
+            "  flight-plan     Pre-declare the scope of the next mission.\n"
+            "  attest          Build a provenance attestation for a mission.\n"
+            "  ledger          Merkle transparency log (root / verify).\n"
+            "  verify-pr       Verify provenance for all commits in a PR range.\n"
+            "  blame           Line-level provenance for a file.\n"
+            "  mcp             Run the provenance MCP server over stdio.\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -417,6 +625,12 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help='Shell command to execute and record, e.g. "python -m pytest".',
     )
+    run_p.add_argument(
+        "--attest",
+        action="store_true",
+        help="Append the mission to the transparency ledger and attach a "
+             "git attestation note after recording (off by default).",
+    )
     run_p.set_defaults(func=cmd_run)
 
     # â”€â”€ wrap â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -432,6 +646,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--name",
         required=True,
         help='Human-readable label for this mission, e.g. "codex session".',
+    )
+    wrap_p.add_argument(
+        "--attest",
+        action="store_true",
+        help="Append the mission to the transparency ledger and attach a "
+             "git attestation note after recording (off by default).",
     )
     wrap_p.add_argument(
         "command_argv",
@@ -542,6 +762,131 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to the mission .zip archive, e.g. blackbox/sessions/20260506_091500_pytest_baseline.zip",
     )
     va_p.set_defaults(func=cmd_verify_archive)
+
+    # ── flight-plan ───────────────────────────────────────────────────────────
+    fp_p = sub.add_parser(
+        "flight-plan",
+        help="Pre-declare the scope of the next recorded mission.",
+        description=(
+            "Write blackbox/flightplan.pending.json.  The next recorded\n"
+            "mission consumes it into the sealed session (flightplan.json)\n"
+            "and references it from the mission's attestation."
+        ),
+    )
+    fp_p.add_argument("--name", required=True, help="Mission name the plan is for.")
+    fp_p.add_argument("--intent", required=True, help="What the mission intends to do.")
+    fp_p.add_argument(
+        "--scope",
+        action="append",
+        required=True,
+        metavar="GLOB",
+        help="fnmatch glob of repo-relative paths the mission may change "
+             "(repeatable).",
+    )
+    fp_p.set_defaults(func=cmd_flight_plan)
+
+    # ── attest ────────────────────────────────────────────────────────────────
+    attest_p = sub.add_parser(
+        "attest",
+        help="Build a provenance attestation for a recorded mission.",
+        description=(
+            "Append the mission to the transparency ledger (if not present),\n"
+            "write provenance.json into the session folder, and attach the\n"
+            "canonical statement as a git note (refs/notes/sao) when the\n"
+            "mission ended on a new commit."
+        ),
+    )
+    attest_p.add_argument("mission_id", help="Mission ID to attest.")
+    attest_p.set_defaults(func=cmd_attest)
+
+    # ── ledger ────────────────────────────────────────────────────────────────
+    ledger_p = sub.add_parser(
+        "ledger",
+        help="Merkle transparency log over mission seals.",
+        description="Inspect and verify blackbox/ledger.jsonl (RFC 6962-style Merkle log).",
+    )
+    ledger_sub = ledger_p.add_subparsers(dest="ledger_command", required=True)
+
+    ledger_root_p = ledger_sub.add_parser(
+        "root",
+        help="Print the current tree size and Merkle root hash.",
+        description="Print {tree_size, root_hash} for the current ledger.",
+    )
+    ledger_root_p.add_argument(
+        "--qr",
+        metavar="PATH",
+        help="Also write a QR image of the root payload to PATH.",
+    )
+    ledger_root_p.set_defaults(func=cmd_ledger_root)
+
+    ledger_verify_p = ledger_sub.add_parser(
+        "verify",
+        help="Re-verify the whole ledger (leaves + inclusion proofs).",
+        description=(
+            "Recompute leaf hashes from session seals where sessions still\n"
+            "exist and verify every entry's inclusion proof against the root."
+        ),
+    )
+    ledger_verify_p.set_defaults(func=cmd_ledger_verify)
+
+    # ── verify-pr ─────────────────────────────────────────────────────────────
+    vpr_p = sub.add_parser(
+        "verify-pr",
+        help="Verify provenance for all commits in a PR range.",
+        description=(
+            "Walk base..head and verify each commit's sao attestation:\n"
+            "hash chain, ledger inclusion/consistency, session diff hash,\n"
+            "signature (when present), and flight-plan scope."
+        ),
+    )
+    vpr_p.add_argument("--base", required=True, help="Base ref (e.g. origin/main).")
+    vpr_p.add_argument("--head", required=True, help="Head ref (e.g. HEAD).")
+    vpr_p.add_argument(
+        "--require-attestation",
+        action="store_true",
+        help="Fail (instead of warn) on commits without an attestation note.",
+    )
+    vpr_p.add_argument(
+        "--strict-scope",
+        action="store_true",
+        help="Fail (instead of warn) when a commit changes files outside "
+             "the mission's declared flight-plan scope.",
+    )
+    vpr_p.add_argument(
+        "--markdown",
+        metavar="PATH",
+        help="Also write a Markdown report suitable for a GitHub check summary.",
+    )
+    vpr_p.set_defaults(func=cmd_verify_pr)
+
+    # ── blame ─────────────────────────────────────────────────────────────────
+    blame_p = sub.add_parser(
+        "blame",
+        help="Line-level provenance for a file.",
+        description=(
+            "Annotate each line of a file with the agent mission that wrote\n"
+            "it, resolved through git blame + refs/notes/sao attestations."
+        ),
+    )
+    blame_p.add_argument("file", help="Repo-relative path of the file to annotate.")
+    blame_p.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit machine-readable JSON instead of the annotated listing.",
+    )
+    blame_p.set_defaults(func=cmd_blame)
+
+    # ── mcp ───────────────────────────────────────────────────────────────────
+    mcp_p = sub.add_parser(
+        "mcp",
+        help="Run the provenance MCP server over stdio.",
+        description=(
+            "Serve newline-delimited JSON-RPC 2.0 (Model Context Protocol)\n"
+            "on stdin/stdout so live agents can file flight plans and query\n"
+            "mission provenance.  Stdlib only; runs until stdin closes."
+        ),
+    )
+    mcp_p.set_defaults(func=cmd_mcp)
 
     return parser
 

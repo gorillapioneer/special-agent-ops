@@ -1,0 +1,58 @@
+# templates/verify-pr.yml — example GitHub Actions workflow for CONSUMER repos.
+#
+# Copy this file into your own repository as .github/workflows/verify-pr.yml
+# to enforce mission provenance on pull requests with `sao verify-pr`.
+#
+# It is stored under templates/ here (not .github/workflows/) because it is
+# meant to run in repos that record sao missions, not in special-agent-ops
+# itself.
+#
+# Notes:
+#   * fetch-depth: 0 — verify-pr walks base..head, so full history is needed.
+#   * refs/notes/sao must be pushed/fetched for attestations to be visible:
+#       git push origin refs/notes/sao
+#     and fetched in CI (the "Fetch sao attestation notes" step below).
+#   * blackbox/ledger.jsonl and blackbox/sessions/ must be committed (or
+#     restored from an artifact store) for ledger and diff checks to run.
+
+name: Verify mission provenance
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-provenance:
+    name: sao verify-pr
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch sao attestation notes
+        run: git fetch origin '+refs/notes/sao:refs/notes/sao' || true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install special-agent-ops
+        run: pip install special-agent-ops
+
+      - name: Verify PR provenance
+        run: |
+          sao verify-pr \
+            --base "origin/${{ github.base_ref }}" \
+            --head "${{ github.event.pull_request.head.sha }}" \
+            --require-attestation \
+            --markdown verify-pr-report.md
+
+      - name: Publish report to job summary
+        if: always()
+        run: cat verify-pr-report.md >> "$GITHUB_STEP_SUMMARY"

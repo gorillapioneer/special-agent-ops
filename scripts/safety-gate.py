@@ -83,9 +83,12 @@ WARN_PATH_PATTERNS = [
     (r"\.ya?ml$",                   "YAML config file"),
 ]
 
-# Repository-owned automation that runs this scanner. Contents are still scanned.
+# Repository-owned automation that runs this scanner, plus documented
+# workflow templates shipped for consumer repos. Contents are still scanned.
 ALLOWED_INTERNAL_PATHS = {
     ".github/workflows/safety-checks.yml",
+    ".github/workflows/tests.yml",
+    "templates/verify-pr.yml",
 }
 
 WARN_CONTENT_PATTERNS = [

@@ -37,6 +37,12 @@ _DIR_HASH_EXCLUDE = {
     "seal_qr_payload.txt",
     "seal_qr.png",
     "mission_summary.md",
+    "pr_report.md",
+    # Provenance attestation is derived AFTER sealing (it references the
+    # seal's own hashes), so it must stay outside the directory hash.
+    # flightplan.json is written BEFORE sealing and is intentionally covered.
+    "provenance.json",
+    "provenance.json.sig",
 }
 
 

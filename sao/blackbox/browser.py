@@ -192,16 +192,22 @@ def _find_seal_for_archive(archive_path: Path) -> dict:
     if session_seal.exists():
         return _load_json(session_seal, "seal")
 
-    # 2. Portable companion file
-    companion = archive_path.with_suffix(".seal.json")
-    if companion.exists():
-        return _load_json(companion, "seal")
+    # 2. Portable companion file.  The documented form appends ".seal.json"
+    #    to the full archive filename (<name>.zip.seal.json); the suffix-
+    #    replacement form (<name>.seal.json) is accepted for compatibility.
+    companions = (
+        archive_path.with_name(archive_path.name + ".seal.json"),
+        archive_path.with_suffix(".seal.json"),
+    )
+    for companion in companions:
+        if companion.exists():
+            return _load_json(companion, "seal")
 
+    checked = "\n".join(f"  {p}" for p in (session_seal, *companions))
     raise FileNotFoundError(
         f"seal.json not found for archive: {archive_path}\n"
         f"Checked:\n"
-        f"  {session_seal}\n"
-        f"  {companion}\n"
+        f"{checked}\n"
         f"To verify portably, distribute the archive with its seal.json:\n"
         f"  cp <session_dir>/seal.json <archive_path>.seal.json"
     )
