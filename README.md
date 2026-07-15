@@ -71,6 +71,7 @@ Copy the `<mission_id>` from the first command's output. Full demo script: [`doc
 - **Flight plans** *(prototype)* — `sao flight-plan` pre-declares mission scope, sealed into the session
 - **PR provenance gate** *(prototype)* — `sao verify-pr` verifies every commit's attestation, ledger proof, git objects, scope, and assurance tier (`--min-tier`)
 - **CI-issued attestations** *(prototype)* — `sao ci-issue` / `sao ci-verify` separate evidence collection (workstation) from attestation issuance (trusted CI): DSSE-wrapped in-toto statements at the `ci-verified` tier
+- **Independent witnessing + anchoring** *(prototype)* — `sao checkpoint` / `sao witness` / `sao anchor`: signed ledger checkpoints cosigned by stateful external witnesses that refuse forks/rollbacks, anchored on an external append-only ref — the `independently-witnessed` tier (anti-equivocation)
 - **Line-level attribution** *(prototype)* — `sao blame` maps lines to missions (derived, best-effort view via git blame)
 - **MCP server** *(prototype)* — `sao mcp` gives live agents provenance tools over the Model Context Protocol
 
@@ -140,9 +141,12 @@ Merkle transparency ledger over mission seals (`sao ledger`), attestation
 statements attached to commits as git notes (`sao attest`, `sao run
 --attest`), pre-declared mission scope (`sao flight-plan`), a PR enforcement
 gate (`sao verify-pr`, with a CI template in
-[`templates/verify-pr.yml`](templates/verify-pr.yml)), line-level
-attribution (`sao blame`), and a stdio MCP server for live agents
-(`sao mcp`).
+[`templates/verify-pr.yml`](templates/verify-pr.yml)), independent
+witnessing and external anchoring of ledger checkpoints
+(`sao checkpoint` / `sao witness` / `sao anchor`, with a witness-repo
+template in [`templates/sao-witness.yml`](templates/sao-witness.yml)),
+line-level attribution (`sao blame`), and a stdio MCP server for live
+agents (`sao mcp`).
 
 Two honesty notes up front:
 
@@ -254,6 +258,12 @@ The whole session folder is also compressed to `<mission_id>.zip`. Sessions are 
 | `sao verify-pr --base REF --head REF [--min-tier TIER]` | Verify provenance (and assurance tier) for all commits in a PR range |
 | `sao ci-issue --commit OID [--signer hmac\|ssh\|none]` | Verify evidence + git reality in CI and issue a DSSE attestation |
 | `sao ci-verify --commit OID --attestation PATH` | Verify a CI-issued DSSE attestation against a commit |
+| `sao checkpoint emit [--signer ssh\|hmac\|none] [--bundle-proof-from N]` | Emit a signed checkpoint of the ledger for witnesses to cosign |
+| `sao checkpoint verify --checkpoint PATH [--require-witnesses N --witness-keys FILE]` | Verify a checkpoint: operator signature, ledger root, pinned cosignature quorum |
+| `sao witness cosign --checkpoint PATH --state-dir DIR --name NAME --signer ssh\|hmac` | Independent witness: verify append-only growth, refuse forks/rollbacks, cosign |
+| `sao witness state --state-dir DIR` | Show the witness's remembered origins (sizes + roots) |
+| `sao anchor push --remote URL [--checkpoint PATH]` | Anchor a checkpoint on an external append-only ref |
+| `sao anchor verify --remote URL [--max-age-days N]` | Verify the external anchor chain + freshness against the local ledger |
 | `sao blame <file> [--json]` | Line-level attribution for a file (derived, best-effort) |
 | `sao mcp` | Run the provenance MCP server over stdio |
 

@@ -1,0 +1,130 @@
+# templates/sao-witness.yml — scheduled INDEPENDENT WITNESS workflow.
+#
+# Place this file in a SEPARATE WITNESS REPO (not in the repo being
+# attested) as .github/workflows/sao-witness.yml. The witness repo holds
+# this workflow, the witness's per-origin state files, and the cosigned
+# checkpoints it has produced. It clones the target repo READ-ONLY.
+#
+# INDEPENDENCE REQUIREMENTS — every one of these is load-bearing:
+#
+#   * DIFFERENT REPO, DIFFERENT MAINTAINERS. The value of a witness is
+#     that the target repo's operator (and any coding agent working in
+#     it) cannot rewrite what the witness remembers. If the same people
+#     control both repos, the witness remembers whatever they want it
+#     to remember — you have bought nothing but ceremony. Witness state
+#     lives HERE and is committed HERE.
+#   * THE WITNESS KEY NEVER TOUCHES THE TARGET REPO. It is a secret of
+#     THIS repo (SAO_WITNESS_HMAC_KEY below, or an SSH key). An agent
+#     with workstation or CI access in the target repo must have no
+#     path to it.
+#   * READ-ONLY VIEW OF THE TARGET. The witness clones the target to
+#     read its ledger and checkpoint; it never pushes to it. Consistency
+#     is verified against the witness's own clone (--ledger-repo), so a
+#     checkpoint that does not match the actually published ledger is
+#     refused.
+#   * SEVERAL OF THESE. One witness forces the operator to show one
+#     consistent log to that witness. N independent witnesses (verified
+#     with `sao checkpoint verify --require-witnesses N` or
+#     `sao verify-pr --min-tier independently-witnessed`) force
+#     equivocation to require N-way collusion. Run this workflow, with
+#     different keys and owners, in several places.
+#
+# WHAT A REFUSAL MEANS: `sao witness cosign` exits non-zero and leaves
+# its state untouched when the target's checkpoint is a rollback, a
+# same-size root swap, or fails its consistency proof — i.e. evidence
+# of a fork/equivocation of the target's transparency ledger. Treat a
+# red run of this workflow as an incident in the TARGET repo, not as a
+# flaky job to re-run.
+#
+# The target repo is expected to emit a fresh operator-signed checkpoint
+# (e.g. in its own CI):  sao checkpoint emit --signer hmac --out blackbox/checkpoint.json
+# and commit/publish it where this workflow can read it.
+
+name: sao witness
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"     # every 6 hours — witness cadence bounds
+                               # how stale a "fresh" claim can be
+  workflow_dispatch: {}
+
+# Configure the target repo being witnessed here.
+env:
+  TARGET_REPO: "https://github.com/OWNER/TARGET-REPO"   # <- change me
+  # Stable ledger identity — must match the --origin the target uses
+  # when emitting checkpoints (its remote URL by default).
+  TARGET_ORIGIN: "https://github.com/OWNER/TARGET-REPO" # <- change me
+  WITNESS_NAME: "witness-OWNER"                         # <- change me
+  # Optional: an external anchor repo this witness also pushes to.
+  # Leave empty to skip anchoring.
+  ANCHOR_REMOTE: ""
+
+permissions:
+  contents: write   # commit witness state + cosigned checkpoints HERE
+
+jobs:
+  witness:
+    name: cosign target checkpoint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the WITNESS repo (state lives here)
+        uses: actions/checkout@v4
+
+      - name: Clone the TARGET repo read-only
+        # Shallow is fine: the witness needs blackbox/ledger.jsonl and
+        # blackbox/checkpoint.json from the target's default branch, not
+        # its full history.
+        run: |
+          git clone --depth 1 "$TARGET_REPO" target-clone
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install special-agent-ops at a PINNED ref
+        # Pin the witness code itself — a witness built from a floating
+        # ref can be swapped out from under you. Use a tag or full SHA.
+        run: |
+          pip install "git+https://github.com/gorillapioneer/special-agent-ops@v0.0.0"  # <- pin me
+
+      - name: Verify and cosign the checkpoint (refuses forks/rollbacks)
+        env:
+          SAO_WITNESS_HMAC_KEY: ${{ secrets.SAO_WITNESS_HMAC_KEY }}
+        run: |
+          # Materialise this witness's key from THIS repo's secrets; the
+          # target repo never sees it.
+          umask 077
+          echo "$SAO_WITNESS_HMAC_KEY" > "$RUNNER_TEMP/witness.key"
+          mkdir -p state cosigned
+          cp target-clone/blackbox/checkpoint.json \
+             "cosigned/checkpoint-latest.json"
+          # --ledger-repo points at OUR clone: the consistency proof from
+          # the remembered checkpoint is computed and checked against the
+          # ledger the target actually published, not against claims in
+          # the checkpoint file.
+          sao witness cosign \
+            --checkpoint "cosigned/checkpoint-latest.json" \
+            --state-dir state \
+            --name "$WITNESS_NAME" \
+            --signer hmac \
+            --key-file "$RUNNER_TEMP/witness.key" \
+            --ledger-repo target-clone
+          rm -f "$RUNNER_TEMP/witness.key"
+
+      - name: Commit updated state + cosigned checkpoint to the witness repo
+        run: |
+          git config user.name "sao-witness"
+          git config user.email "sao-witness@blackbox.invalid"
+          git add state cosigned
+          git commit -m "witness: cosign $TARGET_ORIGIN" || echo "nothing new to commit"
+          git push
+
+      - name: Anchor the cosigned checkpoint externally (optional)
+        if: env.ANCHOR_REMOTE != ''
+        working-directory: target-clone
+        run: |
+          sao anchor push \
+            --remote "$ANCHOR_REMOTE" \
+            --checkpoint "../cosigned/checkpoint-latest.json"

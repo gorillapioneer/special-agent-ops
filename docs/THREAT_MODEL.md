@@ -33,8 +33,9 @@ There is essentially one trust domain on the recording side:
   independent witness.
 
 Independence only enters the picture when something leaves the
-workstation: a ledger root published where the operator cannot rewrite it,
-a verifier running elsewhere (CI), or a future external witness.
+workstation: a ledger root published where the operator cannot rewrite it
+(`sao anchor`), a verifier running elsewhere (CI), or an external witness
+that remembers and cosigns ledger checkpoints (`sao witness`).
 
 ## What the system DOES guarantee
 
@@ -81,7 +82,7 @@ a verifier running elsewhere (CI), or a future external witness.
 | Attack | Status | Notes / mitigation |
 |---|---|---|
 | **Forged-from-scratch consistent history** — operator fabricates sessions, ledger, attestations, and commits that all cross-verify | **Unmitigated locally; final claim mitigated at the CI-verified tier** | By construction, a workstation-only verifier cannot distinguish this from honest history. Mitigations: pin ledger roots externally (publish early, publish often); the `CI-verified` tier (`sao ci-issue`) mints the *final* attestation outside the operator's domain — the workstation can still fabricate evidence, but it can no longer issue the authoritative claim |
-| **Ledger split-view / fork / rollback / freshness attacks** — different verifiers are shown different logs, or an old log is replayed | **Partially mitigated** | Consistency proofs detect rewrites *relative to a root you already hold*. Publish roots externally — e.g. the QR export (`sao ledger root --qr`), PR comments, chat — so there is a widely held root to compare against. Future: independent witnesses/co-signing |
+| **Ledger split-view / fork / rollback / freshness attacks** — different verifiers are shown different logs, or an old log is replayed | **Mitigated at the independently-witnessed tier (with honest caveats)** | Consistency proofs detect rewrites *relative to a root you already hold* — witnesses are that memory, made systematic. A stateful witness (`sao witness cosign`) remembers the last checkpoint per origin, verifies a consistency proof from it, and refuses rollbacks, same-size root swaps, and unprovable growth without updating its state. A client pinning N witness keys (`sao checkpoint verify --require-witnesses N`, `sao verify-pr --min-tier independently-witnessed`) forces equivocation to require N colluding witnesses. External anchoring (`sao anchor push/verify`) adds an append-only checkpoint chain in a repo the operator does not control, plus `--max-age-days` freshness bounds. Caveats: this holds only IF the witnesses are genuinely independent and clients actually pin their keys; the first checkpoint per origin is trust-on-first-use; freshness is bounded by witness/anchor cadence, and timestamps are operator claims unless witnessed. Still publish roots casually too (QR export, PR comments) — cheap extra memory |
 | **Git note replacement** — `refs/notes/sao` notes can be force-replaced (`git notes add -f`) without changing the commit SHA, and are not pushed/fetched by default | **Mitigated by design role** | Notes are a **discovery index, not the durable security store**. The durable copy is the session's `provenance.json` (sealed context, hash-chained, ledgered). v2 notes carry `payload_sha256` so `sao verify-pr` cross-checks note vs session copy; a note whose session is gone is reported as an unverifiable WARN. Push/fetch `refs/notes/sao` explicitly; the CI template does |
 | **Background-process race** — the wrapped command leaves a child running that mutates files after after-state capture, so the seal covers a lie | **Mitigated** | On POSIX the command runs in its own session; surviving process-group members are SIGTERM'd (then SIGKILL'd) before after-state capture and sealing. Sealing binds to a quiesced snapshot. Windows falls back to previous behaviour (no group kill) |
 | **Archive bombs / malicious zips** — crafted session archives with traversal names, symlinks, duplicates, or extreme compression ratios attack the verifier | **Mitigated** | The verifier validates every entry before extraction: absolute names, `..` segments (both separators), duplicates, and symlink entries are rejected; a total decompression budget and per-entry ratio cap make bombs fail cleanly |
@@ -99,13 +100,15 @@ domain.
 | `self-recorded` | Sessions sealed and ledgered locally, unsigned | The workstation operator entirely | **Current default** |
 | `locally-signed` | Attestations signed with an SSH key (`SAO_SIGNING_KEY_FILE`), verified against an allowed-signers file | The operator, minus post-hoc tampering by third parties; key may be agent-readable | **Available now (opt-in)** |
 | `CI-verified` | A trusted CI job (`sao ci-issue`) verifies the local evidence bundle, independently recomputes the commit's git objects, applies policy, and *issues* the final DSSE attestation under an identity the coding agent cannot access; `sao verify-pr --min-tier ci-verified` enforces it | The CI control plane, its pinned workflow, and its signing secret | **Implemented (opt-in)** |
-| `independently-witnessed` | Ledger roots co-signed / mirrored by parties the operator does not control | A quorum of witnesses | **Future** |
+| `independently-witnessed` | Ledger checkpoints cosigned by stateful witnesses the operator does not control (`sao checkpoint` / `sao witness`), optionally anchored externally (`sao anchor`); `sao verify-pr --min-tier independently-witnessed` enforces ci-verified + witnessed leaf coverage | A quorum of genuinely independent witnesses whose keys the client pins | **Implemented (opt-in)** |
 
-The current implementation provides the first three tiers:
-**self-recorded** by default, **locally-signed** when signing is
-configured, and **CI-verified** when a trusted CI job issues the final
-attestation (see
-[docs/PROVENANCE.md](PROVENANCE.md#ci-issued-attestations--the-ci-verified-tier)).
+All four tiers are implemented: **self-recorded** by default,
+**locally-signed** when signing is configured, **CI-verified** when a
+trusted CI job issues the final attestation (see
+[docs/PROVENANCE.md](PROVENANCE.md#ci-issued-attestations--the-ci-verified-tier)),
+and **independently-witnessed** when pinned external witnesses cosign
+the ledger's checkpoints (see
+[docs/PROVENANCE.md](PROVENANCE.md#independent-witnessing--the-independently-witnessed-tier)).
 Everything a verifier reports should be read with its tier in mind.
 
 Be precise about what `CI-verified` adds — and what it does not:
@@ -124,6 +127,41 @@ Be precise about what `CI-verified` adds — and what it does not:
   git reality still passes. The tier certifies *independent
   recomputation of git reality plus policy*, not testimony about what
   happened on the workstation.
+
+Be equally precise about `independently-witnessed` — what it adds, and
+under which conditions:
+
+- It **closes ledger split-view, fork, and rollback** — showing
+  different verifiers different logs, regenerating the log, or serving
+  an old one — **but only IF the witnesses are genuinely independent
+  and clients pin their keys**. A witness remembers the last checkpoint
+  per origin, demands a verifying consistency proof to any new one, and
+  refuses everything else without updating its state; a client requiring
+  N cosignatures from a pinned witness set makes equivocation require N
+  colluding witnesses. A "witness" run by the same people who run the
+  repo, or a client that accepts whatever cosignatures it is handed
+  without pinning keys, restores the single trust domain and buys
+  nothing.
+- The **trust-on-first-use bootstrap is a real limitation**. The first
+  checkpoint a witness sees for an origin is recorded as-is; the witness
+  attests to append-only-ness *from that point on*, not to the honesty
+  of history before it. An operator who forks the ledger *before* any
+  witness first looks is not caught by that witness. Distribute the
+  first checkpoint over a second channel, and prefer several witnesses
+  that started at different times.
+- **Freshness is only as good as the witness/anchor cadence.**
+  Checkpoint timestamps are operator claims unless the checkpoint is
+  witnessed, and `sao anchor verify --max-age-days N` can only bound
+  staleness to the anchoring interval. A verifier that never demands a
+  recent witnessed checkpoint can still be served an old (but
+  once-genuine) view.
+- It does **NOT make the local evidence truthful** — the caveat chain
+  stays fully intact. Witnesses attest that the *ledger* is append-only
+  and singular, i.e. that everyone is being shown the same history of
+  declarations. They say nothing about whether a declaration honestly
+  describes what happened on the workstation. A fabricated-but-
+  consistent evidence bundle, appended once and never rewritten, sails
+  through every witness check by design.
 
 ## Related documents
 
