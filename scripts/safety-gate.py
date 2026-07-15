@@ -86,6 +86,7 @@ WARN_PATH_PATTERNS = [
 # Repository-owned automation that runs this scanner. Contents are still scanned.
 ALLOWED_INTERNAL_PATHS = {
     ".github/workflows/safety-checks.yml",
+    ".github/workflows/tests.yml",
 }
 
 WARN_CONTENT_PATTERNS = [

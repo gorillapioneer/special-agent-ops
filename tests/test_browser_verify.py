@@ -217,14 +217,17 @@ class TestVerifyArchiveFile:
 # ── Extraction helpers ────────────────────────────────────────────────────────
 
 class TestExtractionHelpers:
-    def test_extract_archive_to_temp(self, recorded_mission):
+    def test_extract_archive_to_temp(self, recorded_mission, tmp_path, monkeypatch):
+        # Point the tempfile module at pytest's tmp_path so the extracted
+        # directory is cleaned up with the test's own temp tree.
+        import tempfile
+
+        monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
         tmp = browser.extract_archive_to_temp(recorded_mission["zip_path"])
-        try:
-            session = browser.find_session_dir_in_extracted_archive(tmp)
-            assert session.name == recorded_mission["mission_id"]
-            assert (session / "manifest.json").exists()
-        finally:
-            shutil.rmtree(tmp, ignore_errors=True)
+        assert tmp.name.startswith("sao_verify_")
+        session = browser.find_session_dir_in_extracted_archive(tmp)
+        assert session.name == recorded_mission["mission_id"]
+        assert (session / "manifest.json").exists()
 
     def test_find_session_dir_empty_raises(self, tmp_path: Path):
         with pytest.raises(FileNotFoundError):
