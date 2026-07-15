@@ -69,7 +69,8 @@ Copy the `<mission_id>` from the first command's output. Full demo script: [`doc
 - **Merkle transparency ledger** *(prototype)* — `sao ledger` makes rewrites of the mission log detectable against pinned roots
 - **Git-native attestations** *(prototype)* — `sao attest` / `--attest` bind commits (tree + blob object IDs) to sealed missions via `refs/notes/sao`
 - **Flight plans** *(prototype)* — `sao flight-plan` pre-declares mission scope, sealed into the session
-- **PR provenance gate** *(prototype)* — `sao verify-pr` verifies every commit's attestation, ledger proof, git objects, and scope
+- **PR provenance gate** *(prototype)* — `sao verify-pr` verifies every commit's attestation, ledger proof, git objects, scope, and assurance tier (`--min-tier`)
+- **CI-issued attestations** *(prototype)* — `sao ci-issue` / `sao ci-verify` separate evidence collection (workstation) from attestation issuance (trusted CI): DSSE-wrapped in-toto statements at the `ci-verified` tier
 - **Line-level attribution** *(prototype)* — `sao blame` maps lines to missions (derived, best-effort view via git blame)
 - **MCP server** *(prototype)* — `sao mcp` gives live agents provenance tools over the Model Context Protocol
 
@@ -250,7 +251,9 @@ The whole session folder is also compressed to `<mission_id>.zip`. Sessions are 
 | `sao flight-plan --name ... --intent ... --scope GLOB` | Pre-declare the next mission's scope |
 | `sao attest <mission_id>` | Attest a mission (ledger + `refs/notes/sao`) |
 | `sao ledger root [--qr PATH]` / `sao ledger verify` | Inspect / verify the Merkle transparency ledger |
-| `sao verify-pr --base REF --head REF` | Verify provenance for all commits in a PR range |
+| `sao verify-pr --base REF --head REF [--min-tier TIER]` | Verify provenance (and assurance tier) for all commits in a PR range |
+| `sao ci-issue --commit OID [--signer hmac\|ssh\|none]` | Verify evidence + git reality in CI and issue a DSSE attestation |
+| `sao ci-verify --commit OID --attestation PATH` | Verify a CI-issued DSSE attestation against a commit |
 | `sao blame <file> [--json]` | Line-level attribution for a file (derived, best-effort) |
 | `sao mcp` | Run the provenance MCP server over stdio |
 
