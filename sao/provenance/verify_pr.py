@@ -28,12 +28,17 @@ verify_pr.py — the enforcement gate: verify provenance across a PR range.
                       flight-plan globs (WARN on drift, FAIL with
                       --strict-scope),
   * tier            — the highest verifiable assurance tier for the commit
-                      (self-recorded / locally-signed / ci-verified — see
-                      docs/THREAT_MODEL.md). A commit reaches ci-verified
-                      only when a CI-issued DSSE attestation (discovered
-                      via refs/notes/sao-ci or --ci-attestations-dir)
-                      passes `sao ci-verify` checks. Commits below
-                      --min-tier FAIL.
+                      (self-recorded / locally-signed / ci-verified /
+                      independently-witnessed — see docs/THREAT_MODEL.md).
+                      A commit reaches ci-verified only when a CI-issued
+                      DSSE attestation (discovered via refs/notes/sao-ci
+                      or --ci-attestations-dir) passes `sao ci-verify`
+                      checks; it reaches independently-witnessed when it
+                      is ci-verified AND its ledger leaf is covered by a
+                      checkpoint carrying >= --require-witnesses valid
+                      cosignatures from the pinned --witness-keys set
+                      (checkpoint from --checkpoint or the newest anchor
+                      on --anchors-remote). Commits below --min-tier FAIL.
 
 Both "sao-attestation/1" and "sao-attestation/2" statements are accepted;
 unknown versions FAIL.
@@ -51,7 +56,14 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import attest, envelope as envelope_mod, flightplan, ledger as ledger_mod
+from . import (
+    anchor as anchor_mod,
+    attest,
+    checkpoint as checkpoint_mod,
+    envelope as envelope_mod,
+    flightplan,
+    ledger as ledger_mod,
+)
 
 OK = "OK"
 WARN = "WARN"
@@ -399,6 +411,103 @@ def _determine_ci_tier(
     ), False
 
 
+def _load_witness_context(
+    repo_path,
+    witness_keys,
+    require_witnesses,
+    checkpoint_path,
+    anchors_remote,
+    anchors_ref,
+):
+    """Load and verify the witnessed checkpoint ONCE per verify-pr run.
+
+    Returns None when no checkpoint source was requested, else
+    {"cp": dict|None, "report": dict|None, "source": str, "error": str}.
+    Per-commit leaf coverage is checked separately in _check_witnessed.
+    """
+    if checkpoint_path is None and anchors_remote is None:
+        return None
+    ctx = {"cp": None, "report": None, "source": None, "error": None}
+    if checkpoint_path is not None:
+        try:
+            ctx["cp"] = checkpoint_mod.load_checkpoint(checkpoint_path)
+        except (OSError, ValueError, json.JSONDecodeError) as e:
+            ctx["error"] = f"cannot load checkpoint {checkpoint_path}: {e}"
+            return ctx
+        ctx["source"] = str(checkpoint_path)
+    else:
+        cp, source = anchor_mod.latest_anchored_checkpoint(
+            repo_path, anchors_remote, ref=anchors_ref
+        )
+        if cp is None:
+            ctx["error"] = f"no anchored checkpoint: {source}"
+            return ctx
+        ctx["cp"], ctx["source"] = cp, source
+    if not witness_keys:
+        ctx["error"] = (
+            "a witnessed checkpoint requires a pinned --witness-keys file"
+        )
+        return ctx
+    ctx["report"] = checkpoint_mod.verify_checkpoint(
+        repo_path,
+        ctx["cp"],
+        require_witnesses=require_witnesses,
+        witness_keys_path=witness_keys,
+    )
+    return ctx
+
+
+def _check_witnessed(statement, witness_ctx):
+    """Per-commit witnessed-coverage check.
+
+    Returns (check_dict, witnessed: bool). SKIP when no checkpoint source
+    was given; FAIL loudly when one was given but does not verify or does
+    not cover the commit's ledger leaf.
+    """
+    if witness_ctx is None:
+        return _check(
+            "witnessed-checkpoint", SKIP,
+            "no witnessed checkpoint provided (--checkpoint / "
+            "--anchors-remote)",
+        ), False
+    if witness_ctx["error"]:
+        return _check(
+            "witnessed-checkpoint", FAIL, witness_ctx["error"]
+        ), False
+    cp_report = witness_ctx["report"]
+    if not cp_report["ok"]:
+        failures = "; ".join(
+            f"{c['name']}: {c['detail']}" for c in cp_report["checks"]
+            if c["level"] == FAIL
+        )
+        return _check(
+            "witnessed-checkpoint", FAIL,
+            f"checkpoint does not verify ({witness_ctx['source']}): "
+            f"{failures}",
+        ), False
+    leaf_index = (statement.get("ledger") or {}).get("leaf_index")
+    tree_size = witness_ctx["cp"].get("tree_size")
+    if leaf_index is None:
+        return _check(
+            "witnessed-checkpoint", FAIL,
+            "attestation records no ledger leaf to cover",
+        ), False
+    if leaf_index >= tree_size:
+        return _check(
+            "witnessed-checkpoint", FAIL,
+            f"ledger leaf {leaf_index} is not covered by the witnessed "
+            f"checkpoint (size {tree_size}) — emit and witness a fresh "
+            "checkpoint",
+        ), False
+    witnesses = ", ".join(cp_report["valid_witnesses"]) or "none"
+    return _check(
+        "witnessed-checkpoint", OK,
+        f"leaf {leaf_index} covered by checkpoint size {tree_size} with "
+        f"{len(cp_report['valid_witnesses'])} pinned cosignature(s) "
+        f"({witnesses}) via {witness_ctx['source']}",
+    ), True
+
+
 def _check_tier(tier, min_tier) -> dict:
     have, need = envelope_mod.tier_rank(tier), envelope_mod.tier_rank(min_tier)
     if have >= need:
@@ -420,23 +529,34 @@ def verify_pr(
     min_tier: str = envelope_mod.TIER_SELF_RECORDED,
     ci_hmac_key_file=None,
     ci_attestations_dir=None,
+    witness_keys=None,
+    require_witnesses: int = 1,
+    checkpoint_path=None,
+    anchors_remote=None,
+    anchors_ref=None,
 ) -> dict:
     """Verify provenance for every commit in base..head.
 
     Returns {"ok": bool, "base": ..., "head": ..., "commits": [...],
              "counts": {"attested": n, "unattested": n, "failed": n}}.
     Each commit entry carries its highest verifiable assurance tier;
-    commits below *min_tier* FAIL.
+    commits below *min_tier* FAIL. The independently-witnessed tier
+    additionally needs a witnessed checkpoint source (*checkpoint_path*
+    or *anchors_remote*) plus the pinned *witness_keys* file.
     """
     repo_path = Path(repo_path)
     if envelope_mod.tier_rank(min_tier) < 0:
         raise ValueError(
             f"unknown --min-tier {min_tier!r}; expected one of "
-            f"{', '.join(envelope_mod.TIER_ORDER[:3])}"
+            f"{', '.join(envelope_mod.TIER_ORDER)}"
         )
     min_rank = envelope_mod.tier_rank(min_tier)
     commits = list_range_commits(repo_path, base, head)
     ledger = ledger_mod.Ledger(repo_path)
+    witness_ctx = _load_witness_context(
+        repo_path, witness_keys, require_witnesses,
+        checkpoint_path, anchors_remote, anchors_ref,
+    )
 
     results = []
     attested = unattested = failed = 0
@@ -499,7 +619,11 @@ def verify_pr(
                 repo_path, commit, ci_hmac_key_file, ci_attestations_dir
             )
             entry["checks"].append(ci_check)
-            if ci_verified:
+            witness_check, witnessed = _check_witnessed(statement, witness_ctx)
+            entry["checks"].append(witness_check)
+            if ci_verified and witnessed:
+                entry["tier"] = envelope_mod.TIER_INDEPENDENTLY_WITNESSED
+            elif ci_verified:
                 entry["tier"] = envelope_mod.TIER_CI_VERIFIED
             elif signature_check["level"] == OK:
                 entry["tier"] = envelope_mod.TIER_LOCALLY_SIGNED
