@@ -76,6 +76,12 @@ class TestBlameMapping:
         with pytest.raises(ValueError):
             blame.blame_file(provenance_repo["repo"], "does/not/exist.py")
 
+    def test_result_carries_derived_confidence(self, provenance_repo):
+        """Attribution is a derived, best-effort view and must say so."""
+        result = blame.blame_file(provenance_repo["repo"], "src/alpha.py")
+        assert result["confidence"] == "derived-best-effort"
+        assert "git blame" in result["confidence_note"]
+
 
 class TestRenderText:
     def test_annotated_listing(self, provenance_repo):
@@ -85,6 +91,9 @@ class TestRenderText:
         assert "LINE" in text and "MISSION" in text and "COMMIT" in text
         assert mission_id in text
         assert "attributable to" in text
+        # Footer honesty note: attribution is derived and best-effort.
+        assert "NOTE:" in text
+        assert "best-effort" in text
 
     def test_unattested_shown_as_dash(self, provenance_repo):
         result = blame.blame_file(provenance_repo["repo"], "docs/notes.txt")
@@ -119,6 +128,7 @@ class TestBlameCli:
         assert proc.returncode == 0, proc.stderr
         data = json.loads(proc.stdout)
         assert data["file"] == "src/beta.py"
+        assert data["confidence"] == "derived-best-effort"
         assert all(
             l["mission_id"] == provenance_repo["mission_b"]["mission_id"]
             for l in data["lines"]

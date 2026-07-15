@@ -1,8 +1,10 @@
 """End-to-end tests for sao.blackbox.recorder using real subprocesses and git."""
 
 import json
+import os
 import re
 import sys
+import time
 import zipfile
 from pathlib import Path
 
@@ -115,6 +117,42 @@ class TestRecordMissionArgv:
         assert qr["sha256"] == seal_data["archive_sha256"]
         assert qr["id"] == recorded_mission["mission_id"]
         assert qr["status"] == "PASS"
+
+
+class TestBackgroundProcessRace:
+    """The recorder must quiesce the wrapped command's process group before
+    capturing after-state and sealing (POSIX only)."""
+
+    @pytest.mark.skipif(os.name != "posix", reason="POSIX process groups only")
+    def test_lingering_background_child_killed_before_seal(self, git_repo):
+        pytest.importorskip("qrcode")
+        # The main command exits immediately but leaves a background child
+        # that would write straggler.txt two seconds later — after the
+        # after-state capture and seal, silently changing the "sealed" tree.
+        command = "( sleep 2; echo late > straggler.txt ) & echo main-done"
+        result = recorder.record_mission(
+            name="race demo", command=command, repo_path=git_repo
+        )
+        assert result["exit_code"] == 0
+        stdout = (result["session_dir"] / "stdout.txt").read_text(encoding="utf-8")
+        assert "main-done" in stdout
+
+        # The straggler was killed before after-state capture ...
+        manifest = json.loads(
+            (result["session_dir"] / "manifest.json").read_text(encoding="utf-8")
+        )
+        assert "straggler.txt" not in manifest["changed_files"]
+        assert not (git_repo / "straggler.txt").exists()
+
+        # ... and it is gone, not merely orphaned: even after its write
+        # would have fired, the file never appears.
+        time.sleep(2.5)
+        assert not (git_repo / "straggler.txt").exists()
+
+        # The sealed snapshot still verifies.
+        from sao.blackbox import browser
+
+        assert browser.verify_mission(result["session_dir"])["verified"]
 
 
 class TestRecordMissionFailures:

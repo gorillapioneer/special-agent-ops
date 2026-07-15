@@ -32,7 +32,7 @@ class TestStatement:
     def test_statement_fields(self, provenance_repo):
         session_dir = provenance_repo["mission_a"]["session_dir"]
         statement, text = attest.load_attestation(session_dir)
-        assert statement["version"] == "sao-attestation/1"
+        assert statement["version"] == "sao-attestation/2"
         assert statement["mission_id"] == provenance_repo["mission_a"]["mission_id"]
         assert statement["mission_name"] == "mission a"
         assert statement["agent"]["command_mode"] == "argv"
@@ -73,6 +73,53 @@ class TestStatement:
         assert statement["flightplan_sha256"] is None
 
 
+class TestGitObjects:
+    """v2 attestations bind to git object IDs, not just diff text."""
+
+    @staticmethod
+    def _rev_parse(repo: Path, ref: str) -> str:
+        out = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "--verify", ref],
+            check=True, capture_output=True, text=True,
+        )
+        return out.stdout.strip()
+
+    def test_git_objects_match_real_repo(self, provenance_repo):
+        repo = provenance_repo["repo"]
+        statement, _ = attest.load_attestation(
+            provenance_repo["mission_a"]["session_dir"]
+        )
+        gobj = statement["git_objects"]
+        commit = statement["head_after"]
+        assert gobj["commit"] == commit
+        assert gobj["parent_commit"] == statement["head_before"]
+        # Recorded tree OID is the commit's actual tree.
+        assert gobj["tree"] == self._rev_parse(repo, f"{commit}^{{tree}}")
+        # Mission A added exactly src/alpha.py; its blob OID and mode must
+        # match git reality.
+        changed = {e["path"]: e for e in gobj["changed"]}
+        entry = changed["src/alpha.py"]
+        assert entry["status"] == "A"
+        assert entry["mode"] == "100644"
+        assert entry["blob"] == self._rev_parse(repo, f"{commit}:src/alpha.py")
+
+    def test_no_commit_mission_omits_git_objects(self, git_repo: Path):
+        from sao.blackbox import recorder
+
+        result = recorder.record_mission_argv(
+            name="read only",
+            command_argv=[sys.executable, "-c", "print('no commit')"],
+            repo_path=git_repo,
+            attest=True,
+        )
+        statement = result["attestation"]["statement"]
+        assert "git_objects" not in statement
+
+    def test_collect_git_objects_none_for_unknown_head(self, git_repo: Path):
+        assert attest.collect_git_objects(git_repo, "abc", "unknown") is None
+        assert attest.collect_git_objects(git_repo, "abc", "abc") is None
+
+
 class TestGitNotes:
     def test_note_attached_to_new_commit(self, provenance_repo):
         repo = provenance_repo["repo"]
@@ -85,10 +132,15 @@ class TestGitNotes:
         repo = provenance_repo["repo"]
         result = provenance_repo["mission_b"]["attestation"]
         note = attest.read_git_note(repo, result["note_commit"])
+        statement, payload_sha = attest.note_statement_and_payload(note)
         _, session_text = attest.load_attestation(
             provenance_repo["mission_b"]["session_dir"]
         )
-        assert attest.canonical_json(note) == session_text
+        assert attest.canonical_json(statement) == session_text
+        # The note's payload_sha256 cross-checks against the session copy.
+        assert payload_sha == hashlib.sha256(
+            session_text.encode("utf-8")
+        ).hexdigest()
 
     def test_unattested_commit_has_no_note(self, provenance_repo):
         repo = provenance_repo["repo"]

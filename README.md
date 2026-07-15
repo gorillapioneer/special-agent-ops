@@ -66,11 +66,11 @@ Copy the `<mission_id>` from the first command's output. Full demo script: [`doc
 - **Local mission dashboard** — `sao dashboard` serves a mission index on `127.0.0.1`
 - **MapRoom timeline** — `sao map` generates a standalone local mission timeline
 - **PR mission reports** — `sao pr-report` prints GitHub-ready Markdown for a mission
-- **Merkle transparency ledger** *(prototype)* — `sao ledger` proves the mission log is append-only
-- **Git-native attestations** *(prototype)* — `sao attest` / `--attest` bind commits to sealed missions via `refs/notes/sao`
+- **Merkle transparency ledger** *(prototype)* — `sao ledger` makes rewrites of the mission log detectable against pinned roots
+- **Git-native attestations** *(prototype)* — `sao attest` / `--attest` bind commits (tree + blob object IDs) to sealed missions via `refs/notes/sao`
 - **Flight plans** *(prototype)* — `sao flight-plan` pre-declares mission scope, sealed into the session
-- **PR provenance gate** *(prototype)* — `sao verify-pr` verifies every commit's attestation, ledger proof, and scope
-- **Line-level provenance** *(prototype)* — `sao blame` maps each line to the agent mission that wrote it
+- **PR provenance gate** *(prototype)* — `sao verify-pr` verifies every commit's attestation, ledger proof, git objects, and scope
+- **Line-level attribution** *(prototype)* — `sao blame` maps lines to missions (derived, best-effort view via git blame)
 - **MCP server** *(prototype)* — `sao mcp` gives live agents provenance tools over the Model Context Protocol
 
 Runtime dependency: `qrcode[pil]` for QR image generation. Windows and Unix compatible.
@@ -133,14 +133,26 @@ By default the report prints to stdout. With `--output`, SAO writes the Markdown
 
 ## Verifiable provenance (prototype)
 
-Beyond recording, SAO can now *prove* provenance: an RFC 6962-style Merkle
-transparency ledger over mission seals (`sao ledger`), attestation
+Beyond recording, SAO is a **tamper-evident, git-native audit framework
+for recording and governing declared AI-agent work**: an RFC 6962-style
+Merkle transparency ledger over mission seals (`sao ledger`), attestation
 statements attached to commits as git notes (`sao attest`, `sao run
 --attest`), pre-declared mission scope (`sao flight-plan`), a PR enforcement
 gate (`sao verify-pr`, with a CI template in
 [`templates/verify-pr.yml`](templates/verify-pr.yml)), line-level
-provenance (`sao blame`), and a stdio MCP server for live agents
+attribution (`sao blame`), and a stdio MCP server for live agents
 (`sao mcp`).
+
+Two honesty notes up front:
+
+- The cryptography proves **integrity since sealing**, not truthfulness at
+  creation — the agent, the recorder, and any signing key share one user
+  account on the workstation. What that does and does not defend against
+  is spelled out in [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md).
+- `sao blame` line attribution is a **derived, best-effort view**: git
+  blame maps the surviving textual line to the commit that last touched
+  it, so moves, copying, reformatting, and conflict resolution distort
+  attribution. Commit/patch-level provenance is canonical.
 
 ```bash
 sao flight-plan --name "add greeter" --intent "..." --scope "src/**"
@@ -151,6 +163,7 @@ sao blame src/greeter.py
 ```
 
 Full model, demo sequence, and trust notes: [docs/PROVENANCE.md](docs/PROVENANCE.md).
+Trust boundaries, attack catalogue, and assurance tiers: [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md).
 
 ---
 
@@ -238,7 +251,7 @@ The whole session folder is also compressed to `<mission_id>.zip`. Sessions are 
 | `sao attest <mission_id>` | Attest a mission (ledger + `refs/notes/sao`) |
 | `sao ledger root [--qr PATH]` / `sao ledger verify` | Inspect / verify the Merkle transparency ledger |
 | `sao verify-pr --base REF --head REF` | Verify provenance for all commits in a PR range |
-| `sao blame <file> [--json]` | Line-level provenance for a file |
+| `sao blame <file> [--json]` | Line-level attribution for a file (derived, best-effort) |
 | `sao mcp` | Run the provenance MCP server over stdio |
 
 Source: [`sao/`](sao/)
@@ -508,9 +521,9 @@ Exits with code `0` on VERIFIED, `1` on any mismatch.
 - **Do not run untrusted commands.** If an agent generates the command, review it before recording.
 - **`blackbox/sessions` is gitignored.** Session folders may contain stdout, diffs, and file paths that include sensitive information. They are excluded from git by default.
 - **The dashboard only serves allowlisted files.** `sao dashboard` serves only `seal_card.html`, `mission_summary.md`, `seal_qr_payload.txt`, and `seal_qr.png` from validated session folders. No arbitrary paths can be accessed.
-- **Hashes prove whether files changed after recording, not whether the command was safe.** A VERIFIED result means the recorded data is intact — it says nothing about whether the agent's behaviour was correct or safe.
+- **Hashes prove whether files changed after recording, not whether the command was safe.** A VERIFIED result means the recorded data is intact — it says nothing about whether the agent's behaviour was correct or safe, and nothing about whether the record was truthful when it was created.
 
-See [`docs/SECURITY_MODEL.md`](docs/SECURITY_MODEL.md) for a full explanation.
+See [`docs/SECURITY_MODEL.md`](docs/SECURITY_MODEL.md) for a full explanation, and [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) for the provenance trust boundaries, attack catalogue, and assurance tiers.
 
 ---
 
@@ -790,7 +803,7 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Security
 
-See [`SECURITY.md`](SECURITY.md) and [`docs/SECURITY_MODEL.md`](docs/SECURITY_MODEL.md).
+See [`SECURITY.md`](SECURITY.md), [`docs/SECURITY_MODEL.md`](docs/SECURITY_MODEL.md), and [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
 
 ## License
 

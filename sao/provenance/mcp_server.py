@@ -19,7 +19,7 @@ Tools (each returns content: [{"type": "text", "text": <json-string>}]):
     get_mission        mission_id             -> manifest for one mission
     verify_mission     mission_id             -> seal + ledger inclusion result
     ledger_root                               -> current tree size + root hash
-    blame_file         path                   -> line-level provenance mapping
+    blame_file         path                   -> line-level attribution (best-effort)
 
 Stdlib only.
 """
@@ -106,8 +106,10 @@ TOOLS = [
     {
         "name": "blame_file",
         "description": (
-            "Line-level provenance for a file: map each line's commit to "
-            "the agent mission that wrote it (via refs/notes/sao)."
+            "Line-level attribution for a file: map each line's commit to "
+            "the agent mission whose commit last touched it (via "
+            "refs/notes/sao). Derived, best-effort: git blame distorts "
+            "attribution across moves, reformats, and conflict resolution."
         ),
         "inputSchema": _schema({"path": {"type": "string"}}, ["path"]),
     },

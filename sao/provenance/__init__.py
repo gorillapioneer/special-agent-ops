@@ -5,7 +5,7 @@ Modules:
     attest      Git-native attestation statements (git notes + provenance.json).
     flightplan  Pre-declared mission scope (blackbox/flightplan.pending.json).
     verify_pr   PR enforcement gate over attested commits.
-    blame       Line-level provenance via git blame + sao notes.
+    blame       Line-level attribution via git blame + sao notes (best-effort).
     mcp_server  Stdio MCP server exposing provenance tools to live agents.
 
 Stdlib only — no external dependencies (QR output reuses sao.blackbox.qr_image).

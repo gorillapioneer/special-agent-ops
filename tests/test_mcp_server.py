@@ -127,7 +127,7 @@ class TestTools:
         )
         payload = tool_payload(response)
         assert payload["manifest"]["mission_id"] == mission_id
-        assert payload["attestation"]["version"] == "sao-attestation/1"
+        assert payload["attestation"]["version"] == "sao-attestation/2"
 
     def test_verify_mission(self, provenance_repo):
         mission_id = provenance_repo["mission_b"]["mission_id"]
