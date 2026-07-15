@@ -7,13 +7,40 @@
 # meant to run in repos that record sao missions, not in special-agent-ops
 # itself.
 #
-# Notes:
-#   * fetch-depth: 0 — verify-pr walks base..head, so full history is needed.
-#   * refs/notes/sao must be pushed/fetched for attestations to be visible:
+# TWO JOBS:
+#   issue-attestation — calls the REUSABLE issuer workflow that lives in a
+#       separate policy repo (templates/sao-provenance-issuer.yml) to run
+#       `sao ci-issue` and mint a CI attestation for the merge candidate.
+#   verify-provenance — runs `sao verify-pr --min-tier ci-verified` against
+#       the freshly issued attestation.
+#
+# WHY it is built this way — each property is load-bearing:
+#   * PINNED, OUT OF THE PR'S CONTROL. The issuer workflow is referenced
+#     from another repo at a full commit SHA. Anything the PR can edit
+#     (including THIS file's verify steps) an agent can subvert in the
+#     same PR; the authoritative claim must come from code the PR cannot
+#     touch. Protect the required status check on the CALLED workflow's
+#     job, and treat this caller file as convenience, not enforcement.
+#   * EXACT MERGE CANDIDATE. The issuer resolves
+#     github.event.pull_request.merge_commit_sha — GitHub's test merge of
+#     the PR into its base. Verifying only the branch head lets "fine on
+#     the branch, different after merge" changes through.
+#   * SECRETS THE AGENT CANNOT READ. The HMAC issuance key is an org/repo
+#     secret passed only to the policy repo's workflow. The agent's code
+#     never executes in that job, so it cannot exfiltrate the key and
+#     mint its own "ci-verified" claims.
+#
+# CAVEATS (squash merges / merge queues):
+#   * merge_commit_sha is a TEST merge; it is null while the PR conflicts
+#     and is recomputed as base moves. It is NOT the commit that lands
+#     when you squash-merge or use a merge queue — those create new SHAs.
+#     For squash/merge-queue flows, also run the issuer on merge_group /
+#     push events so the commit that actually lands gets attested, or
+#     gate deploys on verifying the landed commit rather than the PR.
+#   * refs/notes/sao (evidence discovery) and refs/notes/sao-ci
+#     (issuance discovery) must be pushed by whoever creates them:
 #       git push origin refs/notes/sao
-#     and fetched in CI (the "Fetch sao attestation notes" step below).
-#   * blackbox/ledger.jsonl and blackbox/sessions/ must be committed (or
-#     restored from an artifact store) for ledger and diff checks to run.
+#     The issuer workflow pushes refs/notes/sao-ci itself.
 
 name: Verify mission provenance
 
@@ -21,21 +48,45 @@ on:
   pull_request:
 
 permissions:
-  contents: read
+  contents: write   # the called issuer pushes refs/notes/sao-ci
 
 jobs:
+  issue-attestation:
+    name: Issue CI attestation (policy repo, pinned)
+    # ALWAYS pin the called workflow to a full commit SHA in a repo the
+    # PR authors cannot push to. A branch or tag ref can be moved.
+    uses: your-org/sao-policy/.github/workflows/sao-provenance-issuer.yml@8f7d2c1a9b3e4d5f6a7b8c9d0e1f2a3b4c5d6e7f  # v1.2.0
+    with:
+      sao-ref: "v0.9.0"       # pin the sao version the issuer installs
+      strict-scope: true
+    secrets:
+      SAO_CI_HMAC_KEY: ${{ secrets.SAO_CI_HMAC_KEY }}
+
   verify-provenance:
-    name: sao verify-pr
+    name: sao verify-pr (min tier ci-verified)
     runs-on: ubuntu-latest
+    needs: issue-attestation
 
     steps:
       - name: Check out repository (full history)
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          # Verify the merge candidate, not just the head — same commit
+          # the issuer attested.
+          ref: ${{ github.event.pull_request.merge_commit_sha || github.event.pull_request.head.sha }}
 
-      - name: Fetch sao attestation notes
-        run: git fetch origin '+refs/notes/sao:refs/notes/sao' || true
+      - name: Fetch sao attestation notes (evidence + CI issuance)
+        run: |
+          git fetch origin '+refs/notes/sao:refs/notes/sao' || true
+          git fetch origin '+refs/notes/sao-ci:refs/notes/sao-ci' || true
+
+      - name: Download the CI attestation issued for this PR
+        uses: actions/download-artifact@v4
+        with:
+          pattern: sao-ci-attestation-*
+          path: ci-attestations
+          merge-multiple: true
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -43,15 +94,25 @@ jobs:
           python-version: "3.12"
 
       - name: Install special-agent-ops
-        run: pip install special-agent-ops
+        # Pin here too — a verifier at a floating version is a verifier
+        # you don't control.
+        run: pip install special-agent-ops==0.9.0
 
-      - name: Verify PR provenance
+      - name: Verify PR provenance at the ci-verified tier
+        env:
+          SAO_CI_HMAC_KEY: ${{ secrets.SAO_CI_HMAC_KEY }}
         run: |
+          umask 077
+          printf '%s' "$SAO_CI_HMAC_KEY" > "$RUNNER_TEMP/sao-ci-hmac.key"
           sao verify-pr \
             --base "origin/${{ github.base_ref }}" \
-            --head "${{ github.event.pull_request.head.sha }}" \
+            --head HEAD \
             --require-attestation \
+            --min-tier ci-verified \
+            --ci-hmac-key-file "$RUNNER_TEMP/sao-ci-hmac.key" \
+            --ci-attestations-dir ci-attestations \
             --markdown verify-pr-report.md
+          rm -f "$RUNNER_TEMP/sao-ci-hmac.key"
 
       - name: Publish report to job summary
         if: always()

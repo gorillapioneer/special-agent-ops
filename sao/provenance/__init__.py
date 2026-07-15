@@ -4,7 +4,9 @@ Modules:
     ledger      RFC 6962-style Merkle transparency log (blackbox/ledger.jsonl).
     attest      Git-native attestation statements (git notes + provenance.json).
     flightplan  Pre-declared mission scope (blackbox/flightplan.pending.json).
-    verify_pr   PR enforcement gate over attested commits.
+    envelope    in-toto Statements + DSSE envelopes with pluggable signers.
+    ci_issue    CI-side attestation issuance/verification (ci-verified tier).
+    verify_pr   PR enforcement gate over attested commits (tier-aware).
     blame       Line-level attribution via git blame + sao notes (best-effort).
     mcp_server  Stdio MCP server exposing provenance tools to live agents.
 

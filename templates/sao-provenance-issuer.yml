@@ -1,0 +1,133 @@
+# templates/sao-provenance-issuer.yml — REUSABLE issuance workflow.
+#
+# Place this file in a CENTRAL POLICY REPO (not in the repo the agent works
+# on) as .github/workflows/sao-provenance-issuer.yml, and call it from
+# consumer repos via `workflow_call` at a PINNED SHA (see
+# templates/verify-pr.yml for the caller side).
+#
+# WHY a separate repo + pinned ref:
+#   The whole point of the CI-verified tier is that the FINAL attestation
+#   is issued by an identity the coding agent cannot access. If this
+#   workflow lived in the PR's own repo, the agent could edit it in the
+#   same PR and make it lie. Keeping it in a policy repo the agent cannot
+#   push to — and calling it at a pinned commit SHA — puts the issuer
+#   outside the PR's control.
+#
+# WHY the merge candidate:
+#   github.event.pull_request.merge_commit_sha is GitHub's test-merge of
+#   the PR into its base — the thing that would actually land. Verifying
+#   only the head SHA misses "looks fine on the branch, different after
+#   merge" games. merge_commit_sha is null for conflicted PRs and is NOT
+#   the final commit for squash merges or merge queues; for those, run
+#   issuance again on the queued/squashed commit (see the caveats section
+#   in templates/verify-pr.yml). The head SHA fallback below is for
+#   non-PR invocations.
+#
+# SECRETS:
+#   SAO_CI_HMAC_KEY is an organisation/repo secret holding the issuance
+#   key. GitHub does not expose secrets to workflows triggered from forks,
+#   and the agent cannot read it from inside the repo — that is exactly
+#   the property the tier depends on. Rotate it like any signing key.
+
+name: sao provenance issuer (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      commit:
+        description: >
+          Commit OID to attest. Defaults to the PR merge candidate
+          (merge_commit_sha) when called from a pull_request event,
+          else the calling workflow's sha.
+        required: false
+        type: string
+      sao-ref:
+        description: >
+          PINNED git ref (tag or full SHA) of special-agent-ops to
+          install. Pin it — an issuer built from a floating ref can be
+          swapped out from under you.
+        required: true
+        type: string
+      strict-scope:
+        description: Refuse issuance on flight-plan scope drift.
+        required: false
+        type: boolean
+        default: true
+    secrets:
+      SAO_CI_HMAC_KEY:
+        description: HMAC issuance key (hex or raw text, one line).
+        required: true
+
+permissions:
+  contents: write   # needed to push the refs/notes/sao-ci discovery note
+
+jobs:
+  issue:
+    name: sao ci-issue
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Resolve target commit (merge candidate where available)
+        id: target
+        run: |
+          COMMIT="${{ inputs.commit }}"
+          if [ -z "$COMMIT" ]; then
+            COMMIT="${{ github.event.pull_request.merge_commit_sha }}"
+          fi
+          if [ -z "$COMMIT" ] || [ "$COMMIT" = "null" ]; then
+            COMMIT="${{ github.sha }}"
+          fi
+          echo "commit=$COMMIT" >> "$GITHUB_OUTPUT"
+
+      - name: Check out repository (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # Fetch the exact commit under test, not whatever the branch
+          # points at by the time this job runs.
+          ref: ${{ steps.target.outputs.commit }}
+
+      - name: Fetch sao evidence + issuance notes
+        run: |
+          git fetch origin '+refs/notes/sao:refs/notes/sao' || true
+          git fetch origin '+refs/notes/sao-ci:refs/notes/sao-ci' || true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install special-agent-ops at the PINNED ref
+        # Installing from a pinned ref (tag or SHA) means the verifier
+        # code itself cannot be swapped by the PR under test.
+        run: |
+          pip install "git+https://github.com/gorillapioneer/special-agent-ops@${{ inputs.sao-ref }}"
+
+      - name: Issue the CI attestation
+        env:
+          SAO_CI_HMAC_KEY: ${{ secrets.SAO_CI_HMAC_KEY }}
+        run: |
+          # Materialise the secret as a file for --key-file; it never
+          # lands in the repo and the agent's code never runs in this job.
+          umask 077
+          printf '%s' "$SAO_CI_HMAC_KEY" > "$RUNNER_TEMP/sao-ci-hmac.key"
+          sao ci-issue \
+            --commit "${{ steps.target.outputs.commit }}" \
+            --signer hmac \
+            --key-file "$RUNNER_TEMP/sao-ci-hmac.key" \
+            ${{ inputs.strict-scope && '--strict-scope' || '' }} \
+            --out "ci-attestation/${{ steps.target.outputs.commit }}.dsse.json"
+          rm -f "$RUNNER_TEMP/sao-ci-hmac.key"
+
+      - name: Upload attestation artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sao-ci-attestation-${{ steps.target.outputs.commit }}
+          path: ci-attestation/
+          if-no-files-found: error
+
+      - name: Push the refs/notes/sao-ci discovery note
+        # The note is a discovery pointer (statement sha256 + location),
+        # not the security store — the DSSE envelope is. Pushing it lets
+        # `sao verify-pr --min-tier ci-verified` find the attestation.
+        run: git push origin refs/notes/sao-ci

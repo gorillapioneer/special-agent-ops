@@ -12,7 +12,9 @@ Commands:
     sao flight-plan --name "..." --intent "..." --scope "sao/**"
     sao attest <mission_id>
     sao ledger root | sao ledger verify
-    sao verify-pr --base main --head HEAD
+    sao verify-pr --base main --head HEAD [--min-tier ci-verified]
+    sao ci-issue --commit <oid> --signer hmac
+    sao ci-verify --commit <oid> --attestation <path>
     sao blame <file>
     sao mcp
 """
@@ -33,6 +35,8 @@ from sao.blackbox import (
 from sao.provenance import (
     attest as attest_mod,
     blame as blame_mod,
+    ci_issue as ci_issue_mod,
+    envelope as envelope_mod,
     flightplan as flightplan_mod,
     ledger as ledger_mod,
     mcp_server as mcp_mod,
@@ -532,6 +536,36 @@ def cmd_ledger_verify(args) -> int:
     return 0 if result["ok"] else 1
 
 
+# ── ci-issue / ci-verify ─────────────────────────────────────────────────────
+
+def cmd_ci_issue(args) -> int:
+    report = ci_issue_mod.issue(
+        repo_path=Path.cwd(),
+        commit=args.commit,
+        mission_id=args.session,
+        signer_kind=args.signer,
+        key_file=args.key_file,
+        out_path=Path(args.out) if args.out else None,
+        allow_failed_checks=args.allow_failed_checks,
+        strict_scope=args.strict_scope,
+    )
+    print(ci_issue_mod.render_report(report, "CI ISSUE"))
+    return 0 if report["ok"] else 1
+
+
+def cmd_ci_verify(args) -> int:
+    report = ci_issue_mod.ci_verify(
+        repo_path=Path.cwd(),
+        commit=args.commit,
+        attestation_path=Path(args.attestation),
+        hmac_key_file=args.hmac_key_file,
+        allowed_signers=args.allowed_signers,
+        signer_identity=args.signer_identity,
+    )
+    print(ci_issue_mod.render_report(report, "CI VERIFY"))
+    return 0 if report["ok"] else 1
+
+
 # ── verify-pr ────────────────────────────────────────────────────────────────
 
 def cmd_verify_pr(args) -> int:
@@ -542,6 +576,9 @@ def cmd_verify_pr(args) -> int:
             head=args.head,
             require_attestation=args.require_attestation,
             strict_scope=args.strict_scope,
+            min_tier=args.min_tier,
+            ci_hmac_key_file=args.ci_hmac_key_file,
+            ci_attestations_dir=args.ci_attestations_dir,
         )
     except ValueError as e:
         print(f"Error: {e}", file=sys.stderr)
@@ -601,6 +638,8 @@ def build_parser() -> argparse.ArgumentParser:
             "  attest          Build a provenance attestation for a mission.\n"
             "  ledger          Merkle transparency log (root / verify).\n"
             "  verify-pr       Verify provenance for all commits in a PR range.\n"
+            "  ci-issue        Issue a CI attestation (DSSE) after verifying evidence.\n"
+            "  ci-verify       Verify a CI-issued DSSE attestation for a commit.\n"
             "  blame           Line-level attribution for a file (best-effort).\n"
             "  mcp             Run the provenance MCP server over stdio.\n"
         ),
@@ -857,7 +896,112 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         help="Also write a Markdown report suitable for a GitHub check summary.",
     )
+    vpr_p.add_argument(
+        "--min-tier",
+        choices=list(envelope_mod.TIER_ORDER[:3]),
+        default=envelope_mod.TIER_SELF_RECORDED,
+        help="Minimum assurance tier every commit must reach "
+             "(default: self-recorded — current behaviour). ci-verified "
+             "requires a valid CI-issued DSSE attestation per commit.",
+    )
+    vpr_p.add_argument(
+        "--ci-hmac-key-file",
+        metavar="PATH",
+        help="HMAC key file to verify CI-issued attestation signatures "
+             "(ssh envelopes use $SAO_ALLOWED_SIGNERS instead).",
+    )
+    vpr_p.add_argument(
+        "--ci-attestations-dir",
+        metavar="DIR",
+        help="Directory of CI-issued DSSE envelopes to search when a "
+             "commit has no refs/notes/sao-ci discovery note.",
+    )
     vpr_p.set_defaults(func=cmd_verify_pr)
+
+    # ── ci-issue ──────────────────────────────────────────────────────────────
+    ci_issue_p = sub.add_parser(
+        "ci-issue",
+        help="Issue a CI attestation after independently verifying evidence.",
+        description=(
+            "Verify a mission's evidence bundle (seal, ledger, note payload\n"
+            "hash), independently recompute the commit's git objects, apply\n"
+            "policy (flight-plan scope, recorded checks), and emit a DSSE-\n"
+            "wrapped in-toto Statement. Tier is ci-verified only when run\n"
+            "under CI (GITHUB_ACTIONS=true) with a real signer; a local run\n"
+            "stays self-recorded/locally-signed. Attaches a discovery note\n"
+            "under refs/notes/sao-ci."
+        ),
+    )
+    ci_issue_p.add_argument("--commit", required=True, help="Result commit OID to attest.")
+    ci_issue_p.add_argument(
+        "--session",
+        metavar="MISSION_ID",
+        help="Mission id of the evidence bundle (default: discovered via "
+             "the commit's refs/notes/sao note).",
+    )
+    ci_issue_p.add_argument(
+        "--signer",
+        choices=["none", "ssh", "hmac"],
+        default="none",
+        help="Envelope signer. 'none' emits an unsigned envelope and can "
+             "never claim ci-verified.",
+    )
+    ci_issue_p.add_argument(
+        "--key-file",
+        metavar="PATH",
+        help="Signing key file (hmac: default $SAO_CI_HMAC_KEY_FILE; "
+             "ssh: default $SAO_SIGNING_KEY_FILE).",
+    )
+    ci_issue_p.add_argument(
+        "--out",
+        metavar="PATH",
+        help="Envelope output path (default: "
+             "blackbox/ci-attestations/<commit>.dsse.json).",
+    )
+    ci_issue_p.add_argument(
+        "--allow-failed-checks",
+        action="store_true",
+        help="Issue even when the recorded mission exit code is non-zero.",
+    )
+    ci_issue_p.add_argument(
+        "--strict-scope",
+        action="store_true",
+        help="Refuse issuance when the commit changes files outside the "
+             "flight-plan scope (default: advisory warning).",
+    )
+    ci_issue_p.set_defaults(func=cmd_ci_issue)
+
+    # ── ci-verify ─────────────────────────────────────────────────────────────
+    ci_verify_p = sub.add_parser(
+        "ci-verify",
+        help="Verify a CI-issued DSSE attestation against a commit.",
+        description=(
+            "Verify the DSSE signature, check the in-toto statement subject\n"
+            "against the actual commit and tree, and re-run the git reality\n"
+            "checks against the predicate. Prints the assurance tier."
+        ),
+    )
+    ci_verify_p.add_argument("--commit", required=True, help="Commit the statement must match.")
+    ci_verify_p.add_argument(
+        "--attestation", required=True, metavar="PATH",
+        help="Path to the DSSE envelope JSON.",
+    )
+    ci_verify_p.add_argument(
+        "--hmac-key-file",
+        metavar="PATH",
+        help="HMAC key file for hmac-signed envelopes.",
+    )
+    ci_verify_p.add_argument(
+        "--allowed-signers",
+        metavar="PATH",
+        help="ssh allowed-signers file for ssh-signed envelopes.",
+    )
+    ci_verify_p.add_argument(
+        "--signer-identity",
+        default="sao",
+        help="Identity to match in the allowed-signers file (default: sao).",
+    )
+    ci_verify_p.set_defaults(func=cmd_ci_verify)
 
     # ── blame ─────────────────────────────────────────────────────────────────
     blame_p = sub.add_parser(

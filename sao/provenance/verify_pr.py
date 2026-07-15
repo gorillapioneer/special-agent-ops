@@ -26,23 +26,32 @@ verify_pr.py — the enforcement gate: verify provenance across a PR range.
   * signature       — provenance.json.sig verifies when present,
   * scope           — files changed in the commit all match the mission's
                       flight-plan globs (WARN on drift, FAIL with
-                      --strict-scope).
+                      --strict-scope),
+  * tier            — the highest verifiable assurance tier for the commit
+                      (self-recorded / locally-signed / ci-verified — see
+                      docs/THREAT_MODEL.md). A commit reaches ci-verified
+                      only when a CI-issued DSSE attestation (discovered
+                      via refs/notes/sao-ci or --ci-attestations-dir)
+                      passes `sao ci-verify` checks. Commits below
+                      --min-tier FAIL.
 
 Both "sao-attestation/1" and "sao-attestation/2" statements are accepted;
 unknown versions FAIL.
 
-Unattested commits are WARN by default, FAIL with --require-attestation.
+Unattested commits are WARN by default, FAIL with --require-attestation
+(and always FAIL when --min-tier is above self-recorded).
 Exit code 0 when the gate passes, 1 when it fails.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import attest, flightplan, ledger as ledger_mod
+from . import attest, envelope as envelope_mod, flightplan, ledger as ledger_mod
 
 OK = "OK"
 WARN = "WARN"
@@ -338,6 +347,68 @@ def _check_scope(repo_path, statement, commit, strict_scope) -> dict:
     return _check("scope", level, f"scope drift: {drift}")
 
 
+# ── Assurance tier determination ─────────────────────────────────────────────
+
+def _determine_ci_tier(
+    repo_path, commit, ci_hmac_key_file, ci_attestations_dir
+):
+    """Look for a CI-issued attestation and verify it.
+
+    Returns (check_dict, ci_verified: bool). The check is SKIP when no CI
+    attestation is discoverable, OK when one verifies to ci-verified, and
+    FAIL when one is found but does not verify (a bad CI attestation is
+    loud, never silently ignored).
+    """
+    from . import ci_issue  # imported lazily: ci_issue imports this module
+
+    dsse, source = ci_issue.find_ci_attestation(
+        repo_path, commit, ci_attestations_dir
+    )
+    if dsse is None:
+        return _check(
+            "ci-attestation", SKIP,
+            "no CI-issued attestation found (refs/notes/sao-ci or "
+            "--ci-attestations-dir)",
+        ), False
+    report = ci_issue.ci_verify(
+        repo_path,
+        commit,
+        dsse=dsse,
+        hmac_key_file=ci_hmac_key_file,
+        allowed_signers=os.environ.get("SAO_ALLOWED_SIGNERS"),
+        signer_identity=os.environ.get("SAO_SIGNER_IDENTITY", "sao"),
+    )
+    if report["ok"] and report["tier"] == envelope_mod.TIER_CI_VERIFIED:
+        return _check(
+            "ci-attestation", OK,
+            f"CI-issued attestation verifies (ci-verified): {source}",
+        ), True
+    if report["ok"]:
+        return _check(
+            "ci-attestation", WARN,
+            f"CI attestation verifies but claims tier {report['tier']} "
+            f"(issued outside CI?): {source}",
+        ), False
+    failures = "; ".join(
+        f"{c['name']}: {c['detail']}" for c in report["checks"]
+        if c["level"] == FAIL
+    )
+    return _check(
+        "ci-attestation", FAIL,
+        f"CI attestation found but does not verify ({source}): {failures}",
+    ), False
+
+
+def _check_tier(tier, min_tier) -> dict:
+    have, need = envelope_mod.tier_rank(tier), envelope_mod.tier_rank(min_tier)
+    if have >= need:
+        return _check("tier", OK, f"assurance tier {tier} >= required {min_tier}")
+    return _check(
+        "tier", FAIL,
+        f"assurance tier {tier or 'none'} is below required {min_tier}",
+    )
+
+
 # ── Range verification ────────────────────────────────────────────────────────
 
 def verify_pr(
@@ -346,13 +417,24 @@ def verify_pr(
     head: str,
     require_attestation: bool = False,
     strict_scope: bool = False,
+    min_tier: str = envelope_mod.TIER_SELF_RECORDED,
+    ci_hmac_key_file=None,
+    ci_attestations_dir=None,
 ) -> dict:
     """Verify provenance for every commit in base..head.
 
     Returns {"ok": bool, "base": ..., "head": ..., "commits": [...],
              "counts": {"attested": n, "unattested": n, "failed": n}}.
+    Each commit entry carries its highest verifiable assurance tier;
+    commits below *min_tier* FAIL.
     """
     repo_path = Path(repo_path)
+    if envelope_mod.tier_rank(min_tier) < 0:
+        raise ValueError(
+            f"unknown --min-tier {min_tier!r}; expected one of "
+            f"{', '.join(envelope_mod.TIER_ORDER[:3])}"
+        )
+    min_rank = envelope_mod.tier_rank(min_tier)
     commits = list_range_commits(repo_path, base, head)
     ledger = ledger_mod.Ledger(repo_path)
 
@@ -366,6 +448,7 @@ def verify_pr(
             "short": commit[:10],
             "attested": note is not None,
             "mission_id": None,
+            "tier": None,
             "checks": [],
         }
         if note is None:
@@ -374,6 +457,8 @@ def verify_pr(
             entry["checks"].append(_check(
                 "attestation", level, "commit carries no sao attestation note"
             ))
+            if min_rank > 0:
+                entry["checks"].append(_check_tier(None, min_tier))
         else:
             attested += 1
             # A v2 note is the statement plus payload_sha256; strip the
@@ -403,10 +488,24 @@ def verify_pr(
                     repo_path, statement, note_text, note_payload_sha
                 )
             )
-            entry["checks"].append(_check_signature(repo_path, statement))
+            signature_check = _check_signature(repo_path, statement)
+            entry["checks"].append(signature_check)
             entry["checks"].append(
                 _check_scope(repo_path, statement, commit, strict_scope)
             )
+
+            # Highest verifiable assurance tier for this commit.
+            ci_check, ci_verified = _determine_ci_tier(
+                repo_path, commit, ci_hmac_key_file, ci_attestations_dir
+            )
+            entry["checks"].append(ci_check)
+            if ci_verified:
+                entry["tier"] = envelope_mod.TIER_CI_VERIFIED
+            elif signature_check["level"] == OK:
+                entry["tier"] = envelope_mod.TIER_LOCALLY_SIGNED
+            else:
+                entry["tier"] = envelope_mod.TIER_SELF_RECORDED
+            entry["checks"].append(_check_tier(entry["tier"], min_tier))
 
         if any(c["level"] == FAIL for c in entry["checks"]):
             failed += 1
@@ -417,6 +516,7 @@ def verify_pr(
         "ok": ok,
         "base": base,
         "head": head,
+        "min_tier": min_tier,
         "commit_count": len(commits),
         "commits": results,
         "counts": {
@@ -438,6 +538,7 @@ def render_text(report: dict) -> str:
         "  SPECIAL AGENT OPS — VERIFY PR",
         bar,
         f"  Range:      {report['base']}..{report['head']}",
+        f"  Min Tier:   {report.get('min_tier') or 'self-recorded'}",
         f"  Commits:    {report['commit_count']}",
         f"  Attested:   {report['counts']['attested']}",
         f"  Unattested: {report['counts']['unattested']}",
@@ -446,7 +547,8 @@ def render_text(report: dict) -> str:
     ]
     for c in report["commits"]:
         title = c["mission_id"] or "(unattested)"
-        lines.append(f"  {c['short']}  {title}")
+        tier = c.get("tier") or "no tier"
+        lines.append(f"  {c['short']}  {title}  [{tier}]")
         for check in c["checks"]:
             lines.append(f"      [{check['level']:<4}] {check['name']}: {check['detail']}")
     lines.append(bar)
@@ -462,20 +564,22 @@ def render_markdown(report: dict) -> str:
         f"# sao verify-pr — {status}",
         "",
         f"- **Range:** `{report['base']}..{report['head']}`",
+        f"- **Minimum tier:** {report.get('min_tier') or 'self-recorded'}",
         f"- **Commits:** {report['commit_count']} "
         f"({report['counts']['attested']} attested, "
         f"{report['counts']['unattested']} unattested, "
         f"{report['counts']['failed']} failed)",
         f"- **Generated:** {report['generated_at']}",
         "",
-        "| Commit | Mission | Check | Level | Detail |",
-        "| --- | --- | --- | --- | --- |",
+        "| Commit | Mission | Tier | Check | Level | Detail |",
+        "| --- | --- | --- | --- | --- | --- |",
     ]
     for c in report["commits"]:
         mission = c["mission_id"] or "—"
+        tier = c.get("tier") or "—"
         for check in c["checks"]:
             lines.append(
-                f"| `{c['short']}` | {mission} | {check['name']} "
+                f"| `{c['short']}` | {mission} | {tier} | {check['name']} "
                 f"| {check['level']} | {check['detail']} |"
             )
     lines.append("")

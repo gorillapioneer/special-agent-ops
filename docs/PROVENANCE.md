@@ -25,7 +25,8 @@ Five pieces work together:
 | Transparency ledger | `sao ledger root` / `sao ledger verify` | Rewrites of the recorded-mission log are detectable against any previously pinned root |
 | Attestations | `sao attest`, `sao run --attest` | A commit is bound to a declared, sealed mission recording (including the commit's git object IDs) |
 | Flight plans | `sao flight-plan` | The mission declared its scope *before* running; drift is detectable |
-| PR gate | `sao verify-pr` | Every commit in a PR is checked for consistent, untampered declared provenance |
+| PR gate | `sao verify-pr` | Every commit in a PR is checked for consistent, untampered declared provenance (tier-aware: `--min-tier`) |
+| CI issuance | `sao ci-issue` / `sao ci-verify` | A trusted CI job verifies the evidence, recomputes git reality, applies policy, and issues the final DSSE attestation (`ci-verified` tier) |
 | Line provenance | `sao blame` | A derived, best-effort view mapping surviving lines to missions (see caveats below) |
 
 Plus a live-agent interface: `sao mcp` exposes all of it over the Model
@@ -188,6 +189,112 @@ Exit code is 0/1; `--markdown` writes a table suitable for a GitHub check
 summary. A copy-paste GitHub Actions workflow for consumer repos lives at
 [`templates/verify-pr.yml`](../templates/verify-pr.yml) — it checks out
 full history and explicitly fetches `refs/notes/sao`.
+
+## CI-issued attestations — the `CI-verified` tier
+
+Everything above is recorded and attested **on the workstation** — one
+trust domain shared by the agent, the recorder, and any signing key. The
+`CI-verified` tier separates **evidence collection** (workstation) from
+**attestation issuance** (a trusted CI control plane): the workstation
+submits evidence; the final authoritative claim is minted elsewhere,
+under an identity the coding agent cannot access.
+
+```
+ WORKSTATION (one trust domain)                TRUSTED CI CONTROL PLANE
+ ──────────────────────────────                ────────────────────────────
+ agent writes code                             sao ci-issue --commit <oid>
+   │                                             │ 1. fetch the exact commit
+ sao run --attest                                │ 2. verify EVIDENCE:
+   │  seals session, ledgers it,                 │    seal, ledger inclusion
+   │  writes provenance.json,       evidence     │    + consistency, note
+   │  notes refs/notes/sao        ────────────▶  │    payload hash vs session
+   │                              (git push +    │ 3. recompute GIT REALITY:
+   ▼                               notes ref)    │    tree OID, changed paths
+ EVIDENCE BUNDLE                                 │    + blob OIDs/modes — and
+ (declaration, not testimony)                    │    compare with the claims
+                                                 │ 4. apply POLICY: flight-plan
+                                                 │    scope, exit code == 0
+                                                 │ 5. mismatch? REFUSE.
+                                                 ▼
+                                   DSSE envelope (in-toto Statement/v1)
+                                   signed with a CI-held key, tier
+                                   ci-verified, discovery note under
+                                   refs/notes/sao-ci
+```
+
+`sao ci-issue` refuses to issue when any evidence check, git-reality
+comparison, or policy check fails — a non-zero exit with a per-check
+report. And a `ci-issue` run **outside** CI (no `GITHUB_ACTIONS=true`)
+never claims `ci-verified`: it issues at `locally-signed` (signed) or
+`self-recorded` (unsigned) instead, so the tier cannot be minted from
+the workstation.
+
+The emitted artifact is a standard [in-toto
+Statement](https://in-toto.io/Statement/v1) in a
+[DSSE](https://github.com/secure-systems-lab/dsse) envelope
+(`payloadType: application/vnd.in-toto+json`, signatures over the DSSE
+PAE). The subject is the result commit (`digest: {gitCommit, gitTree}`);
+the predicate (`.../agent-source-provenance/v1`) carries the mission and
+agent claims, the recomputed `git_objects`, the flight plan and its
+sha256, the recorded checks, the seal hash, the ledger position, digests
+of the evidence bundle, the assurance tier, and the issuer's identity
+claims (repository, workflow ref, run id, actor when on GitHub
+Actions). Signers are pluggable and dependency-free: `none` (local
+only), `ssh` (`ssh-keygen -Y sign`, same mechanism as provenance.json
+signing), `hmac` (HMAC-SHA256, key from a secret-mounted file — made
+for CI). A Sigstore/keyless signer can slot into the same interface
+later; it is deliberately not bundled to keep the package
+dependency-free.
+
+```bash
+# In CI (GITHUB_ACTIONS=true), with a secret-held key file:
+sao ci-issue --commit <oid> --signer hmac --key-file "$RUNNER_TEMP/key" \
+  --strict-scope
+# -> writes blackbox/ci-attestations/<oid>.dsse.json (or --out PATH)
+# -> attaches a discovery note under refs/notes/sao-ci
+#    (statement sha256 + location — an index, not the security store)
+
+# Anyone holding the key (or an allowed-signers file for ssh):
+sao ci-verify --commit <oid> --attestation <path>.dsse.json \
+  --hmac-key-file key    # or --allowed-signers FILE
+# -> verifies the DSSE signature, the statement subject vs the actual
+#    commit/tree, and re-runs the git reality checks; prints the tier
+
+# Enforce the tier across a PR range:
+sao verify-pr --base origin/main --head HEAD \
+  --min-tier ci-verified --ci-hmac-key-file key \
+  [--ci-attestations-dir DIR]   # fallback discovery without the note
+```
+
+`sao verify-pr --min-tier {self-recorded,locally-signed,ci-verified}`
+(default `self-recorded` — the previous behaviour) determines each
+commit's highest *verifiable* tier: `locally-signed` needs a verifying
+provenance.json.sig; `ci-verified` needs a CI-issued envelope
+(discovered via `refs/notes/sao-ci` or `--ci-attestations-dir`) that
+passes the `ci-verify` checks. Commits below the minimum FAIL, and the
+tier appears per commit in both the text and Markdown reports. A found
+CI attestation that does *not* verify is a loud FAIL, never silently
+ignored.
+
+Deployment templates:
+
+- [`templates/sao-provenance-issuer.yml`](../templates/sao-provenance-issuer.yml)
+  — a **reusable** (`workflow_call`) issuance workflow for a central
+  policy repo: checks out the PR's merge candidate, fetches the notes
+  refs, installs sao at a **pinned** ref, runs `sao ci-issue` with an
+  HMAC key from secrets, uploads the envelope artifact, and pushes the
+  `refs/notes/sao-ci` note.
+- [`templates/verify-pr.yml`](../templates/verify-pr.yml) — the consumer
+  side: calls the issuer at a pinned SHA in a repo the PR cannot touch,
+  then runs `sao verify-pr --min-tier ci-verified`. The comments in the
+  template explain why every property (pinned ref, separate repo, merge
+  candidate, agent-unreadable secrets) is load-bearing, and the
+  squash-merge / merge-queue caveats.
+
+What the tier does and does not add is stated precisely in
+[docs/THREAT_MODEL.md](THREAT_MODEL.md#graduated-assurance-tiers): it
+closes workstation-side forgery of the **final claim**; it does **not**
+make the locally recorded evidence truthful.
 
 ## Line-level provenance: `sao blame`
 

@@ -80,7 +80,7 @@ a verifier running elsewhere (CI), or a future external witness.
 
 | Attack | Status | Notes / mitigation |
 |---|---|---|
-| **Forged-from-scratch consistent history** — operator fabricates sessions, ledger, attestations, and commits that all cross-verify | **Unmitigated locally** | By construction, a workstation-only verifier cannot distinguish this from honest history. Mitigation: pin ledger roots externally (publish early, publish often); future: CI-side attestation issuance so records are minted outside the operator's domain |
+| **Forged-from-scratch consistent history** — operator fabricates sessions, ledger, attestations, and commits that all cross-verify | **Unmitigated locally; final claim mitigated at the CI-verified tier** | By construction, a workstation-only verifier cannot distinguish this from honest history. Mitigations: pin ledger roots externally (publish early, publish often); the `CI-verified` tier (`sao ci-issue`) mints the *final* attestation outside the operator's domain — the workstation can still fabricate evidence, but it can no longer issue the authoritative claim |
 | **Ledger split-view / fork / rollback / freshness attacks** — different verifiers are shown different logs, or an old log is replayed | **Partially mitigated** | Consistency proofs detect rewrites *relative to a root you already hold*. Publish roots externally — e.g. the QR export (`sao ledger root --qr`), PR comments, chat — so there is a widely held root to compare against. Future: independent witnesses/co-signing |
 | **Git note replacement** — `refs/notes/sao` notes can be force-replaced (`git notes add -f`) without changing the commit SHA, and are not pushed/fetched by default | **Mitigated by design role** | Notes are a **discovery index, not the durable security store**. The durable copy is the session's `provenance.json` (sealed context, hash-chained, ledgered). v2 notes carry `payload_sha256` so `sao verify-pr` cross-checks note vs session copy; a note whose session is gone is reported as an unverifiable WARN. Push/fetch `refs/notes/sao` explicitly; the CI template does |
 | **Background-process race** — the wrapped command leaves a child running that mutates files after after-state capture, so the seal covers a lie | **Mitigated** | On POSIX the command runs in its own session; surviving process-group members are SIGTERM'd (then SIGKILL'd) before after-state capture and sealing. Sealing binds to a quiesced snapshot. Windows falls back to previous behaviour (no group kill) |
@@ -98,13 +98,32 @@ domain.
 |---|---|---|---|
 | `self-recorded` | Sessions sealed and ledgered locally, unsigned | The workstation operator entirely | **Current default** |
 | `locally-signed` | Attestations signed with an SSH key (`SAO_SIGNING_KEY_FILE`), verified against an allowed-signers file | The operator, minus post-hoc tampering by third parties; key may be agent-readable | **Available now (opt-in)** |
-| `CI-verified` | A CI system (not the workstation) runs `sao verify-pr` against externally pinned roots, and eventually *issues* attestations itself | The CI system and the pinned roots | **Future** |
+| `CI-verified` | A trusted CI job (`sao ci-issue`) verifies the local evidence bundle, independently recomputes the commit's git objects, applies policy, and *issues* the final DSSE attestation under an identity the coding agent cannot access; `sao verify-pr --min-tier ci-verified` enforces it | The CI control plane, its pinned workflow, and its signing secret | **Implemented (opt-in)** |
 | `independently-witnessed` | Ledger roots co-signed / mirrored by parties the operator does not control | A quorum of witnesses | **Future** |
 
-The current implementation provides the first two tiers:
+The current implementation provides the first three tiers:
 **self-recorded** by default, **locally-signed** when signing is
-configured. Everything a verifier reports today should be read with that
-tier in mind.
+configured, and **CI-verified** when a trusted CI job issues the final
+attestation (see
+[docs/PROVENANCE.md](PROVENANCE.md#ci-issued-attestations--the-ci-verified-tier)).
+Everything a verifier reports should be read with its tier in mind.
+
+Be precise about what `CI-verified` adds — and what it does not:
+
+- It **closes workstation-side forgery of the final claim**. The
+  workstation submits *evidence*; the authoritative attestation is
+  minted by a CI identity (pinned workflow, secret-held key) the coding
+  agent cannot access, after the CI job has independently recomputed the
+  commit's tree and changed blobs from git itself and applied policy
+  (flight-plan scope, recorded checks). An operator can no longer sign
+  an authoritative "this passed" statement from the same keyboard the
+  agent used, and a `ci-issue` run outside CI refuses to claim the tier.
+- It does **NOT make the local evidence truthful**. The session
+  recording is still produced inside the workstation trust domain; a
+  fabricated-but-internally-consistent evidence bundle that also matches
+  git reality still passes. The tier certifies *independent
+  recomputation of git reality plus policy*, not testimony about what
+  happened on the workstation.
 
 ## Related documents
 
