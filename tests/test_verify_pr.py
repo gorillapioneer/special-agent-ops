@@ -358,7 +358,7 @@ class TestCliAndReports:
         md = md_path.read_text(encoding="utf-8")
         assert md.startswith("# sao verify-pr — PASS")
         assert provenance_repo["mission_a"]["mission_id"] in md
-        assert "| Commit | Mission | Check | Level | Detail |" in md
+        assert "| Commit | Mission | Tier | Check | Level | Detail |" in md
 
     def test_cli_fails_when_attestation_required(self, provenance_repo):
         proc = run_cli(
