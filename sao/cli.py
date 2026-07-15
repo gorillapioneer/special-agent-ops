@@ -601,7 +601,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  attest          Build a provenance attestation for a mission.\n"
             "  ledger          Merkle transparency log (root / verify).\n"
             "  verify-pr       Verify provenance for all commits in a PR range.\n"
-            "  blame           Line-level provenance for a file.\n"
+            "  blame           Line-level attribution for a file (best-effort).\n"
             "  mcp             Run the provenance MCP server over stdio.\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -862,10 +862,13 @@ def build_parser() -> argparse.ArgumentParser:
     # ── blame ─────────────────────────────────────────────────────────────────
     blame_p = sub.add_parser(
         "blame",
-        help="Line-level provenance for a file.",
+        help="Line-level attribution for a file (derived, best-effort).",
         description=(
-            "Annotate each line of a file with the agent mission that wrote\n"
-            "it, resolved through git blame + refs/notes/sao attestations."
+            "Annotate each line of a file with the agent mission whose commit\n"
+            "last touched it, resolved through git blame + refs/notes/sao\n"
+            "attestations. Attribution is derived and best-effort: moves,\n"
+            "reformats, and conflict resolution distort it; commit-level\n"
+            "provenance is canonical."
         ),
     )
     blame_p.add_argument("file", help="Repo-relative path of the file to annotate.")

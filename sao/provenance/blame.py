@@ -5,6 +5,12 @@ blame.py — line-level provenance: which agent mission wrote this line?
 line's commit to a mission by reading the commit's attestation note
 (refs/notes/sao).  Lines whose commit carries no note are unattested
 (human or pre-provenance work) and shown with ``-``.
+
+Honesty note: line attribution is a DERIVED, BEST-EFFORT view.  git blame
+maps the *surviving textual line* to the commit that last touched it —
+code movement, copying, reformatting, and merge-conflict resolution all
+distort attribution.  Commit/patch-level provenance (attestations and the
+recorded diff/object IDs) is canonical; blame output is a convenience.
 """
 
 from __future__ import annotations
@@ -15,6 +21,16 @@ from pathlib import Path
 from . import attest
 
 _LINE_TRUNCATE = 80
+
+#: Confidence marker included in every blame result (and --json output).
+CONFIDENCE = "derived-best-effort"
+
+#: One-line caveat shown in human output.
+ATTRIBUTION_NOTE = (
+    "line attribution is derived from git blame (best-effort): moves, "
+    "copies, reformatting, and conflict resolution can distort it; "
+    "commit/patch-level provenance is canonical"
+)
 
 
 def _git(args, cwd) -> subprocess.CompletedProcess:
@@ -107,6 +123,8 @@ def blame_file(repo_path: Path, file_path: str) -> dict:
 
     return {
         "file": file_path,
+        "confidence": CONFIDENCE,
+        "confidence_note": ATTRIBUTION_NOTE,
         "lines": annotated,
         "missions": {c: m for c, m in note_cache.items() if m},
     }
@@ -135,4 +153,5 @@ def render_text(result: dict) -> str:
         f"{attested}/{len(result['lines'])} line(s) attributable to "
         f"attested agent missions"
     )
+    lines_out.append(f"NOTE: {ATTRIBUTION_NOTE}.")
     return "\n".join(lines_out)
